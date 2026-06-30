@@ -1,55 +1,17 @@
-module lattice_operations
+module lattice_output_operations
+    use lattice_boltzmann
+
+    implicit none
+
     contains
-        subroutine populate_lattice(lattice, width, height, directions)
-            implicit none
 
-            integer, intent(in) :: width, height, directions
-            real, intent(inout) :: lattice(directions, width, height)
+        ! More or less just for visualization !
+        function calculate_density_array(lattice)
 
-            integer :: i, j, k
-            real :: u
+            real(8), intent(in) :: lattice(directions, width, height)
 
-            ! populate with random numbers !
-            do i=1, directions
-                do j=1, width
-                    do k=1, height
-                        call random_number(u)
-                        lattice(i,j,k) = u
-                    end do
-                end do
-            end do
-
-        end subroutine populate_lattice
-
-        function streaming_step(lattice, width, height, directions)
-            implicit none
-
-            integer, intent(in) :: width, height, directions
-            real, intent(in) :: lattice(directions, width, height)
-
-            real :: streaming_step(directions, width, height)
-            integer :: i, j, k
-            integer :: shift_directions_x(directions), shift_directions_y(directions)
-
-            ! Initialize shift directions for D2Q9 model !
-            shift_directions_x = [0,  1,  0, -1,  0,  1, -1, -1,  1]
-            shift_directions_y = [0,  0,  1,  0, -1,  1,  1, -1, -1] 
-
-            ! Perform the array shifts !
-            do i=1, directions
-                streaming_step(i,:,:) = cshift(lattice(i,:,:), -shift_directions_x(i), 1)
-                streaming_step(i,:,:) = cshift(streaming_step(i,:,:), shift_directions_y(i), 2)
-            end do
-        end function streaming_step
-
-        function calculate_density_array(lattice, width, height, directions)
-            implicit none
-
-            integer, intent(in) :: width, height, directions
-            real, intent(in) :: lattice(directions, width, height)
-
-            real :: calculate_density_array(width, height)
-            integer :: i, j, k
+            real(8) :: calculate_density_array(width, height)
+            integer :: j, k
 
             ! Calculate density by summing over all directions !
             do j=1, width
@@ -60,27 +22,31 @@ module lattice_operations
 
         end function calculate_density_array
 
-        ! function handle_ghost_nodes(lattice, width, height, directions)
-        !     implicit none
+        ! More or less just for visualization !
+        function calculate_average_velocity_array(lattice, density_arr)
 
-        !     integer, intent(in) :: width, height, directions
-        !     real, intent(in) :: lattice(directions, width, height)
-        !     real :: handle_ghost_nodes(directions, width, height)
+            real(8), intent(in) :: lattice(directions, width, height)
+            real(8), intent(in) :: density_arr(width, height)
 
-        !     integer :: i
+            type(velocity) :: calculate_average_velocity_array(width, height)
+            integer :: i, j, k
 
-            
-            
-        ! end function handle_ghost_nodes
+            do j=1, width
+                do k=1, height
+                    ! Average x velocity !
+                    calculate_average_velocity_array(j,k)%x = sum(lattice(:,j,k) * shift_directions_x(:)) / density_arr(j,k)
+                    ! Average y velocity !
+                    calculate_average_velocity_array(j,k)%y = sum(lattice(:,j,k) * shift_directions_y(:)) / density_arr(j,k)
+                end do
+            end do
 
-end module lattice_operations
+        end function calculate_average_velocity_array
+
+end module lattice_output_operations
 
 program SheBoltOnMyManTilILattice
-    use lattice_operations
+    use lattice_output_operations
     implicit none
-
-    ! Dimensions of the lattice !
-    integer :: height, width, directions
 
     ! Image data !
     integer :: img, img_dim, img_coords(2)
@@ -89,99 +55,101 @@ program SheBoltOnMyManTilILattice
     integer :: i, j, k
 
     ! Lattice arrays !
-    real, target, allocatable :: lattice(:,:,:)[:,:], lattice_new(:,:,:)[:,:], density(:,:)[:,:], density_new(:,:)[:,:]
+    real(8), allocatable :: lattice(:,:,:)[:,:], lattice_new(:,:,:)[:,:], density(:,:)[:,:], density_new(:,:)[:,:]
+    type(velocity), allocatable :: average_velocity(:,:)[:,:], average_velocity_new(:,:)[:,:]
 
     ! Format for printing the lattice !
-    character(len=50) :: format = '(15(f0.2," "),"  ",15(f0.2," "))'
+    !character(len=50) :: format = '(15(f0.2," "),"  ",15(f0.2," "))'
+    character(len=50) :: format = '(15(f0.4," "))'
 
-    ! Pointers for ghost nodes !
-    real, pointer, dimension(:,:) :: north_ptr, south_ptr
-    real, pointer, dimension(:,:) :: east_ptr, west_ptr
-
-    ! Initialize dimensions !
-    height = 15
-    width = 15
-    directions = 9
-    img_dim = 2
+    img_dim = 1
 
     allocate(lattice(directions, width, height)[img_dim,*])
     allocate(lattice_new(directions, width, height)[img_dim,*])
     allocate(density(width, height)[img_dim,*])
     allocate(density_new(width, height)[img_dim,*])
-    allocate(north_ptr(directions, width))
-    allocate(south_ptr(directions, width))
-    allocate(east_ptr(directions, height))
-    allocate(west_ptr(directions, height))
+    allocate(average_velocity(width, height)[img_dim,*])
+    allocate(average_velocity_new(width, height)[img_dim,*])
 
     img = this_image()
     ! img_coords = this_image(lattice)
     ! print *, "Image ", img, " coordinates: (", img_coords, ")"
 
     ! Populate lattice !
-    call populate_lattice(lattice, width, height, directions)
-
-    ! Populate pointers for ghost nodes !
-    ! north_ptr => lattice(:, :, 1)[1, 1]
-    ! south_ptr => lattice(:, :, height)[1, 1]
-    ! west_ptr  => lattice(:, 1, :)[1, 1]
-    ! east_ptr  => lattice(:, width, :)[1, 1]
+    !call populate_lattice_random(lattice, width, height, directions)
+    call populate_lattice_dense_center(lattice)
 
     ! Perform one streaming step !
-    lattice_new = streaming_step(lattice, width, height, directions)
+    lattice_new = streaming_step(lattice)
+
+    ! Perform one collision step !
+    lattice_new = collision_step(lattice_new)
 
     ! Calculate density arrays !
-    density = calculate_density_array(lattice, width, height, directions)
-    density_new = calculate_density_array(lattice_new, width, height, directions)
+    density = calculate_density_array(lattice)
 
-    ! ! Print initial and subsequent lattice !
-    ! print *, " "
-    ! if (img .eq. 1) then
-    !     do i=1, directions
-    !         print *, "Direction: ", i-1
-    !         print *, "Before streaming step:"
-    !         do j=1, height
-    !             write(unit=6, fmt=format) lattice(i,:,j)[1,1], lattice(i,:,j)[2,1]
-    !         end do
-    !         print *, " "
-    !         do j=1, height
-    !             write(unit=6, fmt=format) lattice(i,:,j)[1,2], lattice(i,:,j)[2,2]
-    !         end do
-    !         print *, " "
-    !         print *, "After streaming step:"
-    !         do j=1, height
-    !             write(unit=6, fmt=format) lattice_new(i,:,j)[1,1], lattice_new(i,:,j)[2,1]
-    !         end do
-    !         print *, " "
-    !         do j=1, height
-    !             write(unit=6, fmt=format) lattice_new(i,:,j)[1,2], lattice_new(i,:,j)[2,2]
-    !         end do
-    !         print *, " "
-    !     end do
-    ! end if
-    ! sync all
+    ! Calculate average velocity arrays !
+    ! average_velocity = calculate_average_velocity_array(lattice, density, width, height, directions, shift_directions_x, shift_directions_y)
+    ! average_velocity_new = calculate_average_velocity_array(lattice_new, density_new, width, height, directions, shift_directions_x, shift_directions_y)
 
-    ! Print initial and subsequent density lattices !
-    print *, " "
+    ! Print initial lattice !
     if (img .eq. 1) then
-        print *, "Before streaming step:"
+        print *, " "
+        print *, "Initial lattice:"
         do j=1, height
-            write(unit=6, fmt=format) density(:,j)[1,1], density(:,j)[2,1]
+            write(unit=6, fmt=format) density(:,j)
         end do
         print *, " "
-        do j=1, height
-            write(unit=6, fmt=format) density(:,j)[1,2], density(:,j)[2,2]
-        end do
-        print *, " "
-        print *, "After streaming step:"
-        do j=1, height
-            write(unit=6, fmt=format) density_new(:,j)[1,1], density_new(:,j)[2,1]
-        end do
-        print *, " "
-        do j=1, height
-            write(unit=6, fmt=format) density_new(:,j)[1,2], density_new(:,j)[2,2]
-        end do
-        print *, " "
+        print *, "Initial density: ", sum(lattice)
     end if
     sync all
+
+    do i=1, 1
+        do j=1, 100
+            ! Perform one streaming step !
+            lattice_new = streaming_step(lattice_new)
+
+            ! Perform one collision step !
+            lattice_new = collision_step(lattice_new)
+        end do
+
+        ! Calculate density array !
+        density_new = calculate_density_array(lattice_new)
+
+        ! Print density lattices after each step !
+        if (img .eq. 1) then
+            print *, " "
+            print *, "After ", i*j, " steps:"
+            do j=1, height
+                write(unit=6, fmt=format) density_new(:,j)
+            end do
+            print *, " "
+            print *, "Density diff: ", sum(lattice_new) - sum(lattice)
+        end if
+        sync all
+
+        do j=1, 100000
+            ! Perform one streaming step !
+            lattice_new = streaming_step(lattice_new)
+
+            ! Perform one collision step !
+            lattice_new = collision_step(lattice_new)
+        end do
+
+        ! Calculate density array !
+        density_new = calculate_density_array(lattice_new)
+
+        ! Print density lattices after each step !
+        if (img .eq. 1) then
+            print *, " "
+            print *, "After ", i*j, " steps:"
+            do j=1, height
+                write(unit=6, fmt=format) density_new(:,j)
+            end do
+            print *, " "
+            print *, "Density diff: ", sum(lattice_new) - sum(lattice)
+        end if
+        sync all
+    end do
 
 end program SheBoltOnMyManTilILattice
