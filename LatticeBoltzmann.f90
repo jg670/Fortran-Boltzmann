@@ -34,25 +34,73 @@ module lattice_boltzmann
 
       real(8), intent(in) :: lattice(directions, width, height)
       real(8) :: collision_step(directions, width, height)
-      integer :: i, j, k
+      integer :: i
 
-      real(8) :: average_density, equilibrium, velocity_sum
-      type(velocity) :: average_velocity
+      real(8) :: density_arr(width, height)
+      type(velocity) :: velocity_arr(width, height)
+      real(8) :: equilibriums(directions, width, height)
+      
+      density_arr = calculate_density_array(lattice)
 
-      do j=1, width
-        do k=1, height
-          average_density = sum(lattice(:,j,k))
-          average_velocity%x = sum(lattice(:,j,k) * shift_directions_x(:)) / average_density
-          average_velocity%y = sum(lattice(:,j,k) * shift_directions_y(:)) / average_density
-          do i=1, directions
-            velocity_sum = shift_directions_x(i) * average_velocity%x + shift_directions_y(i) * average_velocity%y
-            equilibrium = weights(i) * average_density * (1.0 + 3.0 * velocity_sum + (9.0 * velocity_sum**2) / 2.0 - 1.5 * (average_velocity%x**2 + average_velocity%y**2))
-            collision_step(i,j,k) = lattice(i,j,k) + omega * (equilibrium - lattice(i,j,k))
-          end do
-        end do
-      end do            
+      velocity_arr = calculate_average_velocity_array(lattice, density_arr)
+
+      equilibriums = calculate_equilibrium(density_arr, velocity_arr)
+
+      do i=1, directions
+        collision_step(i,:,:) = lattice(i,:,:) + omega * (equilibriums(i,:,:) - lattice(i,:,:))
+      end do
 
     end function collision_step
+
+    function calculate_density_array(lattice)
+
+      real(8), intent(in) :: lattice(directions, width, height)
+
+      real(8) :: calculate_density_array(width, height)
+
+      calculate_density_array = sum(lattice, dim=1)
+
+    end function calculate_density_array
+
+    function calculate_average_velocity_array(lattice, density_arr)
+
+      real(8), intent(in) :: lattice(directions, width, height)
+      real(8), intent(in) :: density_arr(width, height)
+
+      type(velocity) :: calculate_average_velocity_array(width, height)
+      integer :: i
+
+      calculate_average_velocity_array%x = 0.0_8
+      calculate_average_velocity_array%y = 0.0_8
+
+      do i=1, directions
+        calculate_average_velocity_array%x = calculate_average_velocity_array%x + lattice(i,:,:) * shift_directions_x(i)
+        calculate_average_velocity_array%y = calculate_average_velocity_array%y + lattice(i,:,:) * shift_directions_y(i)
+      end do
+      calculate_average_velocity_array%x = calculate_average_velocity_array%x / density_arr
+      calculate_average_velocity_array%y = calculate_average_velocity_array%y / density_arr
+
+    end function calculate_average_velocity_array
+
+    function calculate_equilibrium(density_arr, velocity_arr)
+
+      real(8), intent(in) :: density_arr(width, height)
+      type(velocity), intent(in) :: velocity_arr(width, height)
+
+      real(8) :: calculate_equilibrium(directions, width, height)
+
+      integer :: i
+      real(8) :: u_squared(width, height), velocity_sum(width, height)
+
+      u_squared = velocity_arr%x**2 + velocity_arr%y**2
+
+      do i=1, directions
+        velocity_sum = shift_directions_x(i) * velocity_arr%x + shift_directions_y(i) * velocity_arr%y
+
+        calculate_equilibrium(i,:,:) = weights(i) * density_arr * (1.0_8 + 3.0_8 * velocity_sum + (4.5_8 * velocity_sum**2) - 1.5_8 * u_squared)
+      end do
+
+    end function calculate_equilibrium
 
     ! Initialize lattice with (semi)-random values !
     subroutine populate_lattice_random(lattice)
@@ -79,7 +127,7 @@ module lattice_boltzmann
     subroutine populate_lattice_dense_center(lattice)
 
       real(8), intent(inout) :: lattice(directions, width, height)
-      integer :: i, j, k
+      integer :: j, k
       real(8) :: epsilon = 0.01
 
       ! on one point set f(0) to 4/9 + 4/9 * epsilon, f(1,2,3,4) to 1/9 + 1/9 * epsilon, f(5,6,7,8) to 1/36 + 1/36 + epsilon. now roh = 1+epsilon

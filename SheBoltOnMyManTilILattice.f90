@@ -1,51 +1,5 @@
-module lattice_output_operations
-    use lattice_boltzmann
-
-    implicit none
-
-    contains
-
-        ! More or less just for visualization !
-        function calculate_density_array(lattice)
-
-            real(8), intent(in) :: lattice(directions, width, height)
-
-            real(8) :: calculate_density_array(width, height)
-            integer :: j, k
-
-            ! Calculate density by summing over all directions !
-            do j=1, width
-                do k=1, height
-                    calculate_density_array(j,k) = sum(lattice(:,j,k))
-                end do
-            end do
-
-        end function calculate_density_array
-
-        ! More or less just for visualization !
-        function calculate_average_velocity_array(lattice, density_arr)
-
-            real(8), intent(in) :: lattice(directions, width, height)
-            real(8), intent(in) :: density_arr(width, height)
-
-            type(velocity) :: calculate_average_velocity_array(width, height)
-            integer :: i, j, k
-
-            do j=1, width
-                do k=1, height
-                    ! Average x velocity !
-                    calculate_average_velocity_array(j,k)%x = sum(lattice(:,j,k) * shift_directions_x(:)) / density_arr(j,k)
-                    ! Average y velocity !
-                    calculate_average_velocity_array(j,k)%y = sum(lattice(:,j,k) * shift_directions_y(:)) / density_arr(j,k)
-                end do
-            end do
-
-        end function calculate_average_velocity_array
-
-end module lattice_output_operations
-
 program SheBoltOnMyManTilILattice
-    use lattice_output_operations
+    use lattice_boltzmann
     implicit none
 
     ! Image data !
@@ -55,8 +9,9 @@ program SheBoltOnMyManTilILattice
     integer :: i, j, k
 
     ! Lattice arrays !
-    real(8), allocatable :: lattice(:,:,:)[:,:], lattice_new(:,:,:)[:,:], density(:,:)[:,:], density_new(:,:)[:,:]
-    type(velocity), allocatable :: average_velocity(:,:)[:,:], average_velocity_new(:,:)[:,:]
+    real(8), allocatable :: lattice_initial(:,:,:)[:,:], lattice_1_step(:,:,:)[:,:], lattice_100_steps(:,:,:)[:,:], lattice_100000_steps(:,:,:)[:,:]
+    real (8), allocatable :: density_initial(:,:)[:,:], density_1_step(:,:)[:,:], density_100_steps(:,:)[:,:], density_100000_steps(:,:)[:,:]
+    type(velocity), allocatable :: average_velocity_initial(:,:)[:,:], average_velocity_1_step(:,:)[:,:], average_velocity_100_steps(:,:)[:,:], average_velocity_100000_steps(:,:)[:,:]
 
     ! Format for printing the lattice !
     !character(len=50) :: format = '(15(f0.2," "),"  ",15(f0.2," "))'
@@ -64,92 +19,139 @@ program SheBoltOnMyManTilILattice
 
     img_dim = 1
 
-    allocate(lattice(directions, width, height)[img_dim,*])
-    allocate(lattice_new(directions, width, height)[img_dim,*])
-    allocate(density(width, height)[img_dim,*])
-    allocate(density_new(width, height)[img_dim,*])
-    allocate(average_velocity(width, height)[img_dim,*])
-    allocate(average_velocity_new(width, height)[img_dim,*])
+    allocate(lattice_initial(directions, width, height)[img_dim,*])
+    allocate(lattice_1_step(directions, width, height)[img_dim,*])
+    allocate(lattice_100_steps(directions, width, height)[img_dim,*])
+    allocate(lattice_100000_steps(directions, width, height)[img_dim,*])
+    allocate(density_initial(width, height)[img_dim,*])
+    allocate(density_1_step(width, height)[img_dim,*])
+    allocate(density_100_steps(width, height)[img_dim,*])
+    allocate(density_100000_steps(width, height)[img_dim,*])
+    allocate(average_velocity_initial(width, height)[img_dim,*])
+    allocate(average_velocity_1_step(width, height)[img_dim,*])
+    allocate(average_velocity_100_steps(width, height)[img_dim,*])
+    allocate(average_velocity_100000_steps(width, height)[img_dim,*])
 
     img = this_image()
     ! img_coords = this_image(lattice)
     ! print *, "Image ", img, " coordinates: (", img_coords, ")"
 
-    ! Populate lattice !
-    !call populate_lattice_random(lattice, width, height, directions)
-    call populate_lattice_dense_center(lattice)
 
-    ! Perform one streaming step !
-    lattice_new = streaming_step(lattice)
-
-    ! Perform one collision step !
-    lattice_new = collision_step(lattice_new)
-
-    ! Calculate density arrays !
-    density = calculate_density_array(lattice)
-
-    ! Calculate average velocity arrays !
-    ! average_velocity = calculate_average_velocity_array(lattice, density, width, height, directions, shift_directions_x, shift_directions_y)
-    ! average_velocity_new = calculate_average_velocity_array(lattice_new, density_new, width, height, directions, shift_directions_x, shift_directions_y)
+    ! Intial lattice !
+    !call populate_lattice_random(lattice_initial)
+    call populate_lattice_dense_center(lattice_initial)
+    density_initial = calculate_density_array(lattice_initial)
+    average_velocity_initial = calculate_average_velocity_array(lattice_initial, density_initial)    
 
     ! Print initial lattice !
     if (img .eq. 1) then
         print *, " "
         print *, "Initial lattice:"
-        do j=1, height
-            write(unit=6, fmt=format) density(:,j)
+        do k=1, height
+            write(unit=6, fmt=format) density_initial(:,k)
         end do
         print *, " "
-        print *, "Initial density: ", sum(lattice)
+        print *, "Initial density: ", sum(lattice_initial)
+
+        ! Output file !
+        open(1, file="C:\Users\jackg\OneDrive\Desktop\Fortran-Project\Visualization\output-0.txt", status="replace", action="write")
+        do j=1, width
+            do k=1, height
+                write(1, *) j, ", ", k, ", ", density_initial(j,k), ", ", average_velocity_initial(j,k)%x, ", ", average_velocity_initial(j,k)%y
+            end do
+        end do
+        close(1)
     end if
     sync all
 
-    do i=1, 1
-        do j=1, 100
-            ! Perform one streaming step !
-            lattice_new = streaming_step(lattice_new)
 
-            ! Perform one collision step !
-            lattice_new = collision_step(lattice_new)
+    ! Lattice after 1 step !
+    lattice_1_step = streaming_step(lattice_initial)
+    lattice_1_step = collision_step(lattice_1_step)
+    density_1_step = calculate_density_array(lattice_1_step)
+    average_velocity_1_step = calculate_average_velocity_array(lattice_1_step, density_1_step)
+
+    ! Print lattice after 1 step !
+    if (img .eq. 1) then
+        print *, " "
+        print *, "Lattice after 1 step:"
+        do k=1, height
+            write(unit=6, fmt=format) density_1_step(:,k)
         end do
+        print *, " "
+        print *, "Lattice density after 1 step: ", sum(lattice_1_step)
 
-        ! Calculate density array !
-        density_new = calculate_density_array(lattice_new)
-
-        ! Print density lattices after each step !
-        if (img .eq. 1) then
-            print *, " "
-            print *, "After ", i*j, " steps:"
-            do j=1, height
-                write(unit=6, fmt=format) density_new(:,j)
+        ! Output file !
+        open(1, file="C:\Users\jackg\OneDrive\Desktop\Fortran-Project\Visualization\output-1.txt", status="replace", action="write")
+        do j=1, width
+            do k=1, height
+                write(1, *) j, ", ", k, ", ", density_1_step(j,k), ", ", average_velocity_1_step(j,k)%x, ", ", average_velocity_1_step(j,k)%y
             end do
-            print *, " "
-            print *, "Density diff: ", sum(lattice_new) - sum(lattice)
-        end if
-        sync all
-
-        do j=1, 100000
-            ! Perform one streaming step !
-            lattice_new = streaming_step(lattice_new)
-
-            ! Perform one collision step !
-            lattice_new = collision_step(lattice_new)
         end do
+        close(1)
+    end if
+    sync all
 
-        ! Calculate density array !
-        density_new = calculate_density_array(lattice_new)
 
-        ! Print density lattices after each step !
-        if (img .eq. 1) then
-            print *, " "
-            print *, "After ", i*j, " steps:"
-            do j=1, height
-                write(unit=6, fmt=format) density_new(:,j)
-            end do
-            print *, " "
-            print *, "Density diff: ", sum(lattice_new) - sum(lattice)
-        end if
-        sync all
+    ! Lattice after 100 steps !
+    lattice_100_steps = lattice_1_step
+    do i=1, 99
+        lattice_100_steps = streaming_step(lattice_100_steps)
+        lattice_100_steps = collision_step(lattice_100_steps)
     end do
+    density_100_steps = calculate_density_array(lattice_100_steps)
+    average_velocity_100_steps = calculate_average_velocity_array(lattice_100_steps, density_100_steps)
+
+    ! Print lattice after 100 steps !
+    if (img .eq. 1) then
+        print *, " "
+        print *, "Lattice after 100 steps"
+        do k=1, height
+            write(unit=6, fmt=format) density_100_steps(:,k)
+        end do
+        print *, " "
+        print *, "Lattice density after 100 steps: ", sum(lattice_100_steps)
+
+        ! Output file !
+        open(1, file="C:\Users\jackg\OneDrive\Desktop\Fortran-Project\Visualization\output-100.txt", status="replace", action="write")
+        do j=1, width
+            do k=1, height
+                write(1, *) j, ", ", k, ", ", density_100_steps(j,k), ", ", average_velocity_100_steps(j,k)%x, ", ", average_velocity_100_steps(j,k)%y
+            end do
+        end do
+        close(1)
+    end if
+    sync all
+
+
+    ! Lattice after 100000 steps !
+    lattice_100000_steps = lattice_100_steps
+    do i=1, 99900
+        lattice_100000_steps = streaming_step(lattice_100000_steps)
+        lattice_100000_steps = collision_step(lattice_100000_steps)
+    end do
+    density_100000_steps = calculate_density_array(lattice_100000_steps)
+    average_velocity_100000_steps = calculate_average_velocity_array(lattice_100000_steps, density_100000_steps)
+
+    ! Print lattice after 100000 steps !
+    if (img .eq. 1) then
+        print *, " "
+        print *, "Lattice after 100000 steps: "
+        do k=1, height
+            write(unit=6, fmt=format) density_100000_steps(:,k)
+        end do
+        print *, " "
+        print *, "Lattice density after 100000 steps: ", sum(lattice_100000_steps)
+
+        ! Output file !
+        open(1, file="C:\Users\jackg\OneDrive\Desktop\Fortran-Project\Visualization\output-100000.txt", status="replace", action="write")
+        do j=1, width
+            do k=1, height
+                write(1, *) j, ", ", k, ", ", density_100000_steps(j,k), ", ", average_velocity_100000_steps(j,k)%x, ", ", average_velocity_100000_steps(j,k)%y
+            end do
+        end do
+        close(1)
+    end if
+    sync all
 
 end program SheBoltOnMyManTilILattice
