@@ -6,11 +6,14 @@ module lattice_boltzmann
         real(8) :: y
     end type velocity
 
-    integer, parameter :: height = 10, width = 15, directions = 9
-    real(8), parameter :: omega = 1.0
+    integer, parameter :: height = 30, width = 30, directions = 9
+    real(8), parameter :: omega = 1
     real(8), parameter :: shift_directions_x(directions) = [0.0,  1.0,  0.0, -1.0,  0.0,  1.0, -1.0, -1.0,  1.0]
     real(8), parameter :: shift_directions_y(directions) = [0.0,  0.0,  1.0,  0.0, -1.0,  1.0,  1.0, -1.0, -1.0]
     real(8), parameter :: weights(directions) = [4.0_8/9.0_8, 1.0_8/9.0_8, 1.0_8/9.0_8, 1.0_8/9.0_8, 1.0_8/9.0_8, 1.0_8/36.0_8, 1.0_8/36.0_8, 1.0_8/36.0_8, 1.0_8/36.0_8]
+
+    real(8), parameter :: pi = 4.0_8 * atan(1.0_8)
+    real(8), parameter :: epsilon = 0.01
 
     contains
 
@@ -128,7 +131,7 @@ module lattice_boltzmann
 
             real(8), intent(inout) :: lattice(directions, width, height)
             integer :: j, k
-            real(8) :: epsilon = 0.01
+            real(8) :: epsilon1 = 0.01
 
             ! on one point set f(0) to 4/9 + 4/9 * epsilon, f(1,2,3,4) to 1/9 + 1/9 * epsilon, f(5,6,7,8) to 1/36 + 1/36 + epsilon. now roh = 1+epsilon
             ! all other points subtract 4/9 * 1/(m*n-1) * epsilon
@@ -137,17 +140,37 @@ module lattice_boltzmann
             do j=1, width
                 do k=1, height
                     if (j == width/2 .and. k == height/2) then
-                        lattice(1,j,k) = weights(1) + weights(1) * epsilon
-                        lattice(2:5,j,k) = weights(2) + weights(2) * epsilon
-                        lattice(6:,j,k) = weights(6) + weights(6) * epsilon
+                        lattice(1,j,k) = weights(1) + weights(1) * epsilon1
+                        lattice(2:5,j,k) = weights(2) + weights(2) * epsilon1
+                        lattice(6:,j,k) = weights(6) + weights(6) * epsilon1
                     else
-                        lattice(1,j,k) = weights(1) - weights(1) * epsilon * (1.0 / ((width * height) - 1.0))
-                        lattice(2:5,j,k) = weights(2) - weights(2) * epsilon * (1.0 / ((width * height) - 1.0))
-                        lattice(6:,j,k) = weights(6) - weights(6) * epsilon  * (1.0 / ((width * height) - 1.0))
+                        lattice(1,j,k) = weights(1) - weights(1) * epsilon1 * (1.0 / ((width * height) - 1.0))
+                        lattice(2:5,j,k) = weights(2) - weights(2) * epsilon1 * (1.0 / ((width * height) - 1.0))
+                        lattice(6:,j,k) = weights(6) - weights(6) * epsilon1  * (1.0 / ((width * height) - 1.0))
                     end if
                 end do
             end do
 
         end subroutine populate_lattice_dense_center
 
+        subroutine populate_lattice_shear_wave(lattice)
+
+            real(8), intent(inout) :: lattice(directions, width, height)
+
+            real(8) :: density_arr(width, height)
+            type(velocity) :: velocity_arr(width, height)
+
+            integer :: y_pos
+
+            density_arr = 1.0_8
+            velocity_arr%y = 0.0_8
+
+            do y_pos=1, height
+                velocity_arr(:,y_pos)%x = epsilon * sin((2.0_8 * pi * (y_pos-1)) / height)
+            end do
+
+            lattice = calculate_equilibrium(density_arr, velocity_arr)
+
+        end subroutine populate_lattice_shear_wave
+        
 end module lattice_boltzmann
