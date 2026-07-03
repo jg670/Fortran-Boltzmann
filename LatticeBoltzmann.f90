@@ -6,7 +6,7 @@ module lattice_boltzmann
         real(8) :: y
     end type velocity
 
-    integer, parameter :: height = 30, width = 30, directions = 9
+    integer, parameter :: height = 32, width = 32, directions = 9
     real(8), parameter :: omega = 1
     real(8), parameter :: shift_directions_x(directions) = [0.0,  1.0,  0.0, -1.0,  0.0,  1.0, -1.0, -1.0,  1.0]
     real(8), parameter :: shift_directions_y(directions) = [0.0,  0.0,  1.0,  0.0, -1.0,  1.0,  1.0, -1.0, -1.0]
@@ -14,13 +14,41 @@ module lattice_boltzmann
 
     real(8), parameter :: pi = 4.0_8 * atan(1.0_8)
     real(8), parameter :: epsilon = 0.01
+    
+    type(velocity), parameter :: wall_speed = velocity(1.0_8, 0.0_8)
+
+    ! encoding for boundary configuration. 0 is normal periodic boundaries, 1 is Couette flow, 2 is Poiseuille flow, and 3 is sliding lid !
+    integer :: boundary_configuration = 0
 
     contains
+
+        function perform_one_time_step(lattice)
+
+            real(8), intent(in) :: lattice(directions, width, height)
+
+            real(8) :: perform_one_time_step(directions, width, height)
+
+            ! HPC with GPUs says collision first and most places seemed to agree so that is how I implemented it. !
+            perform_one_time_step = collision_step(lattice)
+
+            ! Perform boundary conditions now to avoid potential errors with bad data leaking into the simulation from ghost nodes when doing the first step !
+            if (boundary_configuration == 0) then
+                perform_one_time_step = periodic_boundary(perform_one_time_step)
+
+            else if (boundary_configuration == 1) then
+                perform_one_time_step = couette_boundary(perform_one_time_step)
+
+            end if
+
+            perform_one_time_step = streaming_step(perform_one_time_step)
+
+        end function perform_one_time_step
 
         ! Perform a streaming step, return the new lattice !
         function streaming_step(lattice)
 
             real(8), intent(in) :: lattice(directions, width, height)
+
             real(8) :: streaming_step(directions, width, height)
             integer :: i 
 
@@ -36,9 +64,9 @@ module lattice_boltzmann
         function collision_step(lattice)
 
             real(8), intent(in) :: lattice(directions, width, height)
+
             real(8) :: collision_step(directions, width, height)
             integer :: i
-
             real(8) :: density_arr(width, height)
             type(velocity) :: velocity_arr(width, height)
             real(8) :: equilibriums(directions, width, height)
@@ -54,6 +82,48 @@ module lattice_boltzmann
             end do
 
         end function collision_step
+
+        function periodic_boundary(lattice)
+
+            real(8), intent(in) :: lattice(directions, width, height)
+
+            real(8) :: periodic_boundary(directions, width, height)
+
+            periodic_boundary = lattice
+
+            periodic_boundary(:,1,:) = periodic_boundary(:,width-1,:)
+            periodic_boundary(:,width,:) = periodic_boundary(:,2,:)
+            periodic_boundary(:,:,1) = periodic_boundary(:,:,height-1)
+            periodic_boundary(:,:,height) = periodic_boundary(:,:,2)
+
+        end function periodic_boundary
+
+        function couette_boundary(lattice)
+
+            real(8), intent(in) :: lattice(directions, width, height)
+
+            real(8) :: couette_boundary(directions, width, height)
+            real(8) :: average_density
+
+            couette_boundary = lattice
+
+            ! Side walls with periodic boundary conditions !
+            couette_boundary(:,1,:) = couette_boundary(:, width-1,:)
+            couette_boundary(:,width,:) = couette_boundary(:,2,:)
+
+            ! Bottom bounce-back boundary (indexes are +1 since fortran is 1-indexed) !
+            couette_boundary(3,:,height) = couette_boundary(5,:,height-1)
+            couette_boundary(6,1:width-1,height) = couette_boundary(8,2:width,height-1)
+            couette_boundary(7,2:width,height) = couette_boundary(9,1:width-1,height-1)
+
+            average_density = sum(lattice) / (width * height)
+
+            ! Top moving boundary (y velocity is 0, so nothing is added) !
+            couette_boundary(5,:,1) = couette_boundary(3,:,2)
+            couette_boundary(8,2:width,1) = couette_boundary(6,1:width-1,2) - 2.0_8 * weights(6) * average_density * ((shift_directions_x(6) * wall_speed%x) / (1.0_8 / 3.0_8))
+            couette_boundary(9,1:width-1,1) = couette_boundary(7,2:width,2) - 2.0_8 * weights(7) * average_density * ((shift_directions_x(7) * wall_speed%x) / (1.0_8 / 3.0_8))
+
+        end function couette_boundary
 
         function calculate_density_array(lattice)
 
@@ -165,12 +235,28 @@ module lattice_boltzmann
             density_arr = 1.0_8
             velocity_arr%y = 0.0_8
 
-            do y_pos=1, height
-                velocity_arr(:,y_pos)%x = epsilon * sin((2.0_8 * pi * (y_pos-1)) / height)
+            do y_pos=2, height-1
+                velocity_arr(:,y_pos)%x = epsilon * sin((2.0_8 * pi * (y_pos-1)) / (height-2))
             end do
 
             lattice = calculate_equilibrium(density_arr, velocity_arr)
 
         end subroutine populate_lattice_shear_wave
+
+        subroutine populate_lattice_couette(lattice)
+
+            real(8), intent(inout) :: lattice(directions, width, height)
+
+            real(8) :: density_arr(width, height)
+            type(velocity) :: velocity_arr(width, height)
+
+            boundary_configuration = 1
+
+            density_arr = 1.0_8
+            velocity_arr = velocity(0.0_8, 0.0_8)
+
+            lattice = calculate_equilibrium(density_arr, velocity_arr)
+
+        end subroutine populate_lattice_couette
         
 end module lattice_boltzmann

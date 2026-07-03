@@ -25,9 +25,10 @@ program SheBoltOnMyManTilILattice
     ! Intial lattice !
     !call populate_lattice_random(lattice_initial)
     !call populate_lattice_dense_center(lattice_initial)
-    call populate_lattice_shear_wave(lattice_initial)
+    !call populate_lattice_shear_wave(lattice_initial)
+    call populate_lattice_couette(lattice_initial)
     
-    call output_results(lattice_initial, 25, 20)
+    call output_results(lattice_initial, 25, 100)
 
 end program SheBoltOnMyManTilILattice
 
@@ -55,18 +56,17 @@ subroutine output_results(lattice, interval_length, num_intervals)
 
         !intial_a = velocity_arr(15,12)%x
 
-        open(1, file="C:\Users\jackg\OneDrive\Desktop\Fortran-Project\Visualization\output-0.txt", status="replace", action="write")
-            do j=1, width
-                do k=1, height
-                    write(1, *) j, ", ", k, ", ", density_arr(j,k), ", ", velocity_arr(j,k)%x, ", ", velocity_arr(j,k)%y
+        open(1, file="C:\Users\jackg\OneDrive\Desktop\Fortran-Project\Visualization\output-0-couette.txt", status="replace", action="write")
+            do j=2, width-1
+                do k=2, height-1
+                    write(1, *) j-1, ", ", k-1, ", ", density_arr(j,k), ", ", velocity_arr(j,k)%x, ", ", velocity_arr(j,k)%y
                 end do
             end do
         close(1)
 
         do interval=1, num_intervals
             do sub_interval=1, interval_length
-                lattice = streaming_step(lattice)
-                lattice = collision_step(lattice)
+                lattice = perform_one_time_step(lattice)
             end do
 
             density_arr = calculate_density_array(lattice)
@@ -76,11 +76,11 @@ subroutine output_results(lattice, interval_length, num_intervals)
 
             ! Output file !
             write(interval_str, '(I0)') interval * interval_length
-            file_name = "C:\Users\jackg\OneDrive\Desktop\Fortran-Project\Visualization\output-" // trim(adjustl(interval_str)) // ".txt"
+            file_name = "C:\Users\jackg\OneDrive\Desktop\Fortran-Project\Visualization\output-" // trim(adjustl(interval_str)) // "-couette.txt"
             open(1, file=file_name, status="replace", action="write")
-            do j=1, width
-                do k=1, height
-                    write(1, *) j, ", ", k, ", ", density_arr(j,k), ", ", velocity_arr(j,k)%x, ", ", velocity_arr(j,k)%y
+            do j=2, width-1
+                do k=2, height-1
+                    write(1, *) j-1, ", ", k-1, ", ", density_arr(j,k), ", ", velocity_arr(j,k)%x, ", ", velocity_arr(j,k)%y
                 end do
             end do
             close(1)            
