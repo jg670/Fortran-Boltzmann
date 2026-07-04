@@ -17,7 +17,7 @@ module lattice_boltzmann
     
     type(velocity), parameter :: wall_speed = velocity(1.0_8, 0.0_8)
 
-    real(8), parameter :: poiseuille_in_pressure = 1.0, poiseuille_out_pressure = 0.99
+    real(8), parameter :: poiseuille_in_pressure = 0.3, poiseuille_out_pressure = 0.29
 
     ! encoding for boundary configuration. 0 is normal periodic boundaries, 1 is Couette flow, 2 is Poiseuille flow, and 3 is sliding lid !
     integer :: boundary_configuration = 0
@@ -159,13 +159,14 @@ module lattice_boltzmann
             f_star_east_minus_feq(:,1,:) = lattice(:,width-1,:) - equilibriums(:,width-1,:)
             f_star_west_minus_feq(:,1,:) = lattice(:,2,:) - equilibriums(:,2,:)
 
+            ! Update velocities to match new pressure !
             velocity_arr(width-1,:)%x = velocity_arr(width-1,:)%x * (density_arr(width-1,:) / density_in)
             velocity_arr(width-1,:)%y = velocity_arr(width-1,:)%y * (density_arr(width-1,:) / density_in)
         
             velocity_arr(2,:)%x = velocity_arr(2,:)%x * (density_arr(2,:) / density_out)
             velocity_arr(2,:)%y = velocity_arr(2,:)%y * (density_arr(2,:) / density_out)
 
-            ! Set east border to density_in and west border to density_out, this way I do not need to change velocity array for equilibrium calculation !
+            ! Set density array east border to density_in and west border to density_out !
             density_arr(width-1,:) = density_in
             density_arr(2,:) = density_out
 
@@ -387,5 +388,52 @@ module lattice_boltzmann
             lattice = calculate_equilibrium(density_arr, velocity_arr)
 
         end subroutine populate_lattice_sliding_lid
+
+        function calculate_analytical_viscosity()
+
+            real(8) :: calculate_analytical_viscosity
+            
+            calculate_analytical_viscosity = (1.0_8 / 3.0_8) * ((1.0_8 / omega) - 0.5_8)
+
+        end function calculate_analytical_viscosity
+
+        subroutine check_viscosity(intial_a, new_a, time_step)
+
+            real(8), intent(in) :: intial_a, new_a
+            integer, intent(in) :: time_step
+
+            real(8) :: log_term, calculated_viscosity, k, analytical_viscosity
+
+            k = (2.0_8 * pi) / height
+            log_term = log(new_a / intial_a)
+            calculated_viscosity = log_term * (-1.0_8 / (k**2 * time_step))
+
+            analytical_viscosity = calculate_analytical_viscosity()
+
+            print *, "Calculated viscosity: ", calculated_viscosity
+            print *, "Analytical viscosity: ", analytical_viscosity
+            print *, "Difference: ", calculated_viscosity - analytical_viscosity
+
+
+        end subroutine check_viscosity
+
+        subroutine check_poiseuille_velocity(point_density, point_speed, y_pos)
+
+            real(8), intent(in) :: point_density, point_speed
+            integer :: y_pos
+
+            real(8) :: analytical_viscosity, mu, analytical_speed
+
+            analytical_viscosity = calculate_analytical_viscosity()
+
+            mu = point_density * analytical_viscosity
+
+            analytical_speed = (-1.0_8 / (2.0_8 * mu)) * ((poiseuille_out_pressure - poiseuille_in_pressure) / width) * (y_pos - 1.5_8) * ((height - 0.5_8) - y_pos)
+
+            print *, "Calculated speed: ", point_speed
+            print *, "Analytical: ", analytical_speed
+            print *, "Difference: ", point_speed - analytical_speed
+
+        end subroutine check_poiseuille_velocity
         
 end module lattice_boltzmann

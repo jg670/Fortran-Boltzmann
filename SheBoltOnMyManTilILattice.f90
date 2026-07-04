@@ -73,7 +73,8 @@ subroutine output_results(lattice, interval_length, num_intervals)
             density_arr = calculate_density_array(lattice)
             velocity_arr = calculate_average_velocity_array(lattice, density_arr)
 
-            !call check_viscosity(lattice, intial_a, velocity_arr(15,12)%x, interval * interval_length)
+            !call check_viscosity(intial_a, velocity_arr(15,12)%x, interval * interval_length)
+            !call check_poiseuille_velocity(density_arr(15,12), velocity_arr(15,12)%x, 12)
 
             ! Output file !
             write(interval_str, '(I0)') interval * interval_length
@@ -90,25 +91,3 @@ subroutine output_results(lattice, interval_length, num_intervals)
     sync all
 
 end subroutine output_results
-
-subroutine check_viscosity(lattice, intial_a, new_a, time_step)
-    use lattice_boltzmann
-
-    real(8), intent(in) ::  lattice(directions, width, height)
-    real(8), intent(in) :: intial_a, new_a
-    integer, intent(in) :: time_step
-
-    real(8) :: log_term, calculated_viscosity, k, analytical_viscosity
-
-    k = (2.0_8 * pi) / height
-    log_term = log(new_a / intial_a)
-    calculated_viscosity = log_term * (-1.0_8 / (k**2 * time_step))
-
-    analytical_viscosity = (1.0_8 / 3.0_8) * ((1.0_8 / omega) - 0.5_8)
-
-    print *, "Calculated viscosity: ", calculated_viscosity
-    print *, "Analytical viscosity: ", analytical_viscosity
-    print *, "Difference: ", calculated_viscosity - analytical_viscosity
-
-
-end subroutine check_viscosity
