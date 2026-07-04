@@ -26,9 +26,10 @@ program SheBoltOnMyManTilILattice
     !call populate_lattice_random(lattice_initial)
     !call populate_lattice_dense_center(lattice_initial)
     !call populate_lattice_shear_wave(lattice_initial)
-    call populate_lattice_couette(lattice_initial)
+    !call populate_lattice_couette(lattice_initial)
+    call populate_lattice_poiseuille(lattice_initial)
     
-    call output_results(lattice_initial, 25, 100)
+    call output_results(lattice_initial, 25, 1000)
 
 end program SheBoltOnMyManTilILattice
 
@@ -56,7 +57,7 @@ subroutine output_results(lattice, interval_length, num_intervals)
 
         !intial_a = velocity_arr(15,12)%x
 
-        open(1, file="C:\Users\jackg\OneDrive\Desktop\Fortran-Project\Visualization\output-0-couette.txt", status="replace", action="write")
+        open(1, file="C:\Users\jackg\OneDrive\Desktop\Fortran-Project\Visualization\output-0-poiseuille.txt", status="replace", action="write")
             do j=2, width-1
                 do k=2, height-1
                     write(1, *) j-1, ", ", k-1, ", ", density_arr(j,k), ", ", velocity_arr(j,k)%x, ", ", velocity_arr(j,k)%y
@@ -76,7 +77,7 @@ subroutine output_results(lattice, interval_length, num_intervals)
 
             ! Output file !
             write(interval_str, '(I0)') interval * interval_length
-            file_name = "C:\Users\jackg\OneDrive\Desktop\Fortran-Project\Visualization\output-" // trim(adjustl(interval_str)) // "-couette.txt"
+            file_name = "C:\Users\jackg\OneDrive\Desktop\Fortran-Project\Visualization\output-" // trim(adjustl(interval_str)) // "-poiseuille.txt"
             open(1, file=file_name, status="replace", action="write")
             do j=2, width-1
                 do k=2, height-1

@@ -17,6 +17,8 @@ module lattice_boltzmann
     
     type(velocity), parameter :: wall_speed = velocity(1.0_8, 0.0_8)
 
+    real(8), parameter :: poiseuille_in_pressure = 1.0, poiseuille_out_pressure = 0.99
+
     ! encoding for boundary configuration. 0 is normal periodic boundaries, 1 is Couette flow, 2 is Poiseuille flow, and 3 is sliding lid !
     integer :: boundary_configuration = 0
 
@@ -37,6 +39,12 @@ module lattice_boltzmann
 
             else if (boundary_configuration == 1) then
                 perform_one_time_step = couette_boundary(perform_one_time_step)
+
+            else if (boundary_configuration == 2) then
+                perform_one_time_step = poiseuille_boundary(perform_one_time_step)
+
+            else if (boundary_configuration == 3) then
+                perform_one_time_step = sliding_lid_boundary(perform_one_time_step)
 
             end if
 
@@ -124,6 +132,95 @@ module lattice_boltzmann
             couette_boundary(9,1:width-1,1) = couette_boundary(7,2:width,2) - 2.0_8 * weights(7) * average_density * ((shift_directions_x(7) * wall_speed%x) / (1.0_8 / 3.0_8))
 
         end function couette_boundary
+
+        function poiseuille_boundary(lattice)
+
+            real(8), intent(in) :: lattice(directions, width, height)
+
+            real(8) :: poiseuille_boundary(directions, width, height)
+
+            real(8) :: density_in, density_out
+            real(8) :: density_arr(width, height)
+            type(velocity) :: velocity_arr(width, height)
+            real(8) :: f_star_west_minus_feq(directions, 1, height), f_star_east_minus_feq(directions, 1, height)
+            real(8) :: equilibriums(directions, width, height)
+
+            poiseuille_boundary = lattice
+
+            ! Pressure calculations !
+            density_in = poiseuille_in_pressure / (1.0_8 / 3.0_8)
+            density_out = poiseuille_out_pressure / (1.0_8 / 3.0_8)
+
+            density_arr = calculate_density_array(lattice)
+            velocity_arr = calculate_average_velocity_array(lattice, density_arr)
+
+            equilibriums = calculate_equilibrium(density_arr, velocity_arr)
+
+            f_star_east_minus_feq(:,1,:) = lattice(:,width-1,:) - equilibriums(:,width-1,:)
+            f_star_west_minus_feq(:,1,:) = lattice(:,2,:) - equilibriums(:,2,:)
+
+            velocity_arr(width-1,:)%x = velocity_arr(width-1,:)%x * (density_arr(width-1,:) / density_in)
+            velocity_arr(width-1,:)%y = velocity_arr(width-1,:)%y * (density_arr(width-1,:) / density_in)
+        
+            velocity_arr(2,:)%x = velocity_arr(2,:)%x * (density_arr(2,:) / density_out)
+            velocity_arr(2,:)%y = velocity_arr(2,:)%y * (density_arr(2,:) / density_out)
+
+            ! Set east border to density_in and west border to density_out, this way I do not need to change velocity array for equilibrium calculation !
+            density_arr(width-1,:) = density_in
+            density_arr(2,:) = density_out
+
+            equilibriums = calculate_equilibrium(density_arr, velocity_arr)
+
+            ! Side walls with periodic boundary conditions and pressure differential !
+            poiseuille_boundary(:,1,:) = equilibriums(:,width-1,:) + f_star_east_minus_feq(:,1,:)
+            poiseuille_boundary(:,width,:) = equilibriums(:,2,:) + f_star_west_minus_feq(:,1,:)
+
+
+            ! Bottom bounce-back boundary (indexes are +1 since fortran is 1-indexed) !
+            poiseuille_boundary(3,:,height) = poiseuille_boundary(5,:,height-1)
+            poiseuille_boundary(6,1:width-1,height) = poiseuille_boundary(8,2:width,height-1)
+            poiseuille_boundary(7,2:width,height) = poiseuille_boundary(9,1:width-1,height-1)
+
+            ! Top bounce-back boundary (indexes are +1 since fortran is 1-indexed) !
+            poiseuille_boundary(5,:,1) = poiseuille_boundary(3,:,2)
+            poiseuille_boundary(8,2:width,1) = poiseuille_boundary(6,1:width-1,2)
+            poiseuille_boundary(9,1:width-1,1) = poiseuille_boundary(7,2:width,2)
+
+        end function poiseuille_boundary
+
+        function sliding_lid_boundary(lattice)
+
+            real(8), intent(in) ::  lattice(directions, width, height)
+
+            real(8) :: sliding_lid_boundary(directions, width, height)
+
+            real(8) :: average_density
+
+            sliding_lid_boundary = lattice
+
+            average_density = sum(lattice) / (width * height)
+
+            ! Top moving boundary (y velocity is 0, so nothing is added) !
+            sliding_lid_boundary(5,:,1) = sliding_lid_boundary(3,:,2)
+            sliding_lid_boundary(8,2:width,1) = sliding_lid_boundary(6,1:width-1,2) - 2.0_8 * weights(6) * average_density * ((shift_directions_x(6) * wall_speed%x) / (1.0_8 / 3.0_8))
+            sliding_lid_boundary(9,1:width-1,1) = sliding_lid_boundary(7,2:width,2) - 2.0_8 * weights(7) * average_density * ((shift_directions_x(7) * wall_speed%x) / (1.0_8 / 3.0_8))
+
+            ! Bottom bounce-back boundary (indexes are +1 since fortran is 1-indexed) !
+            sliding_lid_boundary(3,:,height) = sliding_lid_boundary(5,:,height-1)
+            sliding_lid_boundary(6,1:width-1,height) = sliding_lid_boundary(8,2:width,height-1)
+            sliding_lid_boundary(7,2:width,height) = sliding_lid_boundary(9,1:width-1,height-1)
+
+            ! Left side bounce-back boundary (indexes are +1 since fortran is 1-indexed) !
+            sliding_lid_boundary(2,1,:) = sliding_lid_boundary(4,2,:)
+            sliding_lid_boundary(6,1,2:height) = sliding_lid_boundary(8,2,1:height-1)
+            sliding_lid_boundary(9,1,1:height-1) = sliding_lid_boundary(7,2,2:height)
+
+            ! Right side bounce-back boundary (indexes are +1 since fortran is 1-indexed) !
+            sliding_lid_boundary(4,width,:) = sliding_lid_boundary(2, width-1,:)
+            sliding_lid_boundary(7,width,2:height) = sliding_lid_boundary(9,width-1,1:height-1)
+            sliding_lid_boundary(8,width,1:height-1) = sliding_lid_boundary(6,width-1,2:height)
+
+        end function sliding_lid_boundary
 
         function calculate_density_array(lattice)
 
@@ -258,5 +355,37 @@ module lattice_boltzmann
             lattice = calculate_equilibrium(density_arr, velocity_arr)
 
         end subroutine populate_lattice_couette
+
+        subroutine populate_lattice_poiseuille(lattice)
+
+            real(8), intent(inout) :: lattice(directions, width, height)
+
+            real(8) :: density_arr(width, height)
+            type(velocity) :: velocity_arr(width, height)
+
+            boundary_configuration = 2
+
+            density_arr = 1.0_8
+            velocity_arr = velocity(0.0_8, 0.0_8)
+
+            lattice = calculate_equilibrium(density_arr, velocity_arr)
+
+        end subroutine populate_lattice_poiseuille
+
+        subroutine populate_lattice_sliding_lid(lattice)
+
+            real(8), intent(inout) :: lattice(directions, width, height)
+
+            real(8) :: density_arr(width, height)
+            type(velocity) :: velocity_arr(width, height)
+
+            boundary_configuration = 3
+
+            density_arr = 1.0_8
+            velocity_arr = velocity(0.0_8, 0.0_8)
+
+            lattice = calculate_equilibrium(density_arr, velocity_arr)
+
+        end subroutine populate_lattice_sliding_lid
         
 end module lattice_boltzmann
