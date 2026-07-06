@@ -6,7 +6,7 @@ module lattice_boltzmann
         real(8) :: y
     end type velocity
 
-    integer, parameter :: height = 32, width = 32, directions = 9
+    integer, parameter :: height = 302, width = 302, directions = 9
     real(8), parameter :: omega = 1
     real(8), parameter :: shift_directions_x(directions) = [0.0,  1.0,  0.0, -1.0,  0.0,  1.0, -1.0, -1.0,  1.0]
     real(8), parameter :: shift_directions_y(directions) = [0.0,  0.0,  1.0,  0.0, -1.0,  1.0,  1.0, -1.0, -1.0]
@@ -15,7 +15,7 @@ module lattice_boltzmann
     real(8), parameter :: pi = 4.0_8 * atan(1.0_8)
     real(8), parameter :: epsilon = 0.01
     
-    type(velocity), parameter :: wall_speed = velocity(1.0_8, 0.0_8)
+    type(velocity) :: wall_speed = velocity(0.1_8, 0.0_8)
 
     real(8), parameter :: poiseuille_in_pressure = 0.3, poiseuille_out_pressure = 0.29
 
@@ -199,12 +199,7 @@ module lattice_boltzmann
 
             sliding_lid_boundary = lattice
 
-            average_density = sum(lattice) / (width * height)
-
-            ! Top moving boundary (y velocity is 0, so nothing is added) !
-            sliding_lid_boundary(5,:,1) = sliding_lid_boundary(3,:,2)
-            sliding_lid_boundary(8,2:width,1) = sliding_lid_boundary(6,1:width-1,2) - 2.0_8 * weights(6) * average_density * ((shift_directions_x(6) * wall_speed%x) / (1.0_8 / 3.0_8))
-            sliding_lid_boundary(9,1:width-1,1) = sliding_lid_boundary(7,2:width,2) - 2.0_8 * weights(7) * average_density * ((shift_directions_x(7) * wall_speed%x) / (1.0_8 / 3.0_8))
+            average_density = sum(lattice(:,2:width-1,2:height-1)) / ((width - 2.0_8) * (height - 2.0_8))
 
             ! Bottom bounce-back boundary (indexes are +1 since fortran is 1-indexed) !
             sliding_lid_boundary(3,:,height) = sliding_lid_boundary(5,:,height-1)
@@ -220,6 +215,11 @@ module lattice_boltzmann
             sliding_lid_boundary(4,width,:) = sliding_lid_boundary(2, width-1,:)
             sliding_lid_boundary(7,width,2:height) = sliding_lid_boundary(9,width-1,1:height-1)
             sliding_lid_boundary(8,width,1:height-1) = sliding_lid_boundary(6,width-1,2:height)
+
+             ! Top moving boundary (y velocity is 0, so nothing is added) !
+            sliding_lid_boundary(5,:,1) = sliding_lid_boundary(3,:,2)
+            sliding_lid_boundary(8,2:width,1) = sliding_lid_boundary(6,1:width-1,2) - 2.0_8 * weights(6) * average_density * ((shift_directions_x(6) * wall_speed%x) / (1.0_8 / 3.0_8))
+            sliding_lid_boundary(9,1:width-1,1) = sliding_lid_boundary(7,2:width,2) - 2.0_8 * weights(7) * average_density * ((shift_directions_x(7) * wall_speed%x) / (1.0_8 / 3.0_8))
 
         end function sliding_lid_boundary
 
@@ -385,6 +385,8 @@ module lattice_boltzmann
             density_arr = 1.0_8
             velocity_arr = velocity(0.0_8, 0.0_8)
 
+            call set_lid_velocity_given_reynolds(1000.0_8)
+
             lattice = calculate_equilibrium(density_arr, velocity_arr)
 
         end subroutine populate_lattice_sliding_lid
@@ -435,5 +437,13 @@ module lattice_boltzmann
             print *, "Difference: ", point_speed - analytical_speed
 
         end subroutine check_poiseuille_velocity
+
+        subroutine set_lid_velocity_given_reynolds(reynolds_number)
+
+            real(8), intent(in) ::  reynolds_number
+            
+            wall_speed = velocity((reynolds_number * calculate_analytical_viscosity()) / (width - 2.0_8), 0.0_8)
+
+        end subroutine set_lid_velocity_given_reynolds
         
 end module lattice_boltzmann
