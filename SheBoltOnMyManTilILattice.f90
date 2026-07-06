@@ -30,7 +30,7 @@ program SheBoltOnMyManTilILattice
     !call populate_lattice_poiseuille(lattice_initial)
     call populate_lattice_sliding_lid(lattice_initial)
     
-    call output_results(lattice_initial, 25, 1000)
+    call output_results(lattice_initial, 50, 500)
 
 end program SheBoltOnMyManTilILattice
 
