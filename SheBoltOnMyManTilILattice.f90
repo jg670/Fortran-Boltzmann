@@ -2,14 +2,16 @@ program SheBoltOnMyManTilILattice
     use lattice_boltzmann
     implicit none
 
-    ! Image data !
     integer :: total_images, args_count, io_status
+    integer :: current_img, current_img_x, current_img_y, img_grid_x, img_grid_y
+    integer :: norm_width, norm_height, mod_width, mod_height
     character(len=20) :: width_arg, height_arg, coarray_dim_arg
 
     ! Lattice arrays !
     real(8), allocatable :: lattice_initial(:,:,:)[:,:]
 
     total_images = num_images()
+    current_img = this_image()
 
     args_count = command_argument_count()
 
@@ -23,22 +25,46 @@ program SheBoltOnMyManTilILattice
     call get_command_argument(3, coarray_dim_arg)
 
     read(width_arg, *, iostat=io_status) global_width
-    if(io_status /= 0) then
+    if (io_status /= 0) then
         print *, "Argument '", trim(width_arg), "' is not a valid integer."
+        stop
     end if
 
     read(height_arg, *, iostat=io_status) global_height
-    if(io_status /= 0) then
+    if (io_status /= 0) then
         print *, "Argument '", trim(height_arg), "' is not a valid integer."
+        stop
     end if
 
     read(coarray_dim_arg, *, iostat=io_status) coarray_dimensions
-    if(io_status /= 0) then
+    if (io_status /= 0) then
         print *, "Argument '", trim(coarray_dim_arg), "' is not a valid integer."
+        stop
     end if
 
-    instance_width = global_width / coarray_dimensions + 2
-    instance_height = global_height / (total_images / coarray_dimensions) + 2
+    img_grid_x = coarray_dimensions
+    img_grid_y = (total_images + img_grid_x - 1) / img_grid_x
+
+    current_img_x = mod(current_img - 1, img_grid_x) + 1
+    current_img_y = (current_img - 1) / img_grid_x + 1
+
+    norm_width = global_width / img_grid_x
+    mod_width = mod(global_width, img_grid_x)
+
+    if (current_img_x == img_grid_x) then
+        instance_width = norm_width + mod_width + 2
+    else
+        instance_width = norm_width + 2
+    end if
+
+    norm_height = global_height / img_grid_y
+    mod_height = mod(global_height, img_grid_y)
+
+    if (current_img_y == img_grid_y) then
+        instance_height = norm_height + mod_height + 2
+    else
+        instance_height = norm_height + 2
+    end if
 
     allocate(lattice_initial(directions, instance_width, instance_height)[coarray_dimensions,*])
 
@@ -80,7 +106,7 @@ program SheBoltOnMyManTilILattice
 
                 !intial_a = velocity_arr(15,12)%x
 
-                open(1, file="C:\Users\jackg\OneDrive\Desktop\Fortran-Project\Visualization\output-0-sliding-lid.txt", status="replace", action="write")
+                open(1, file="./Visualization/output-0-sliding-lid.txt", status="replace", action="write")
                     do j=2, instance_width-1
                         do k=2, instance_height-1
                             write(1, *) j-1, ", ", k-1, ", ", density_arr(j,k), ", ", velocity_arr(j,k)%x, ", ", velocity_arr(j,k)%y
@@ -101,7 +127,7 @@ program SheBoltOnMyManTilILattice
 
                     ! Output file !
                     write(interval_str, '(I0)') interval * interval_length
-                    file_name = "C:\Users\jackg\OneDrive\Desktop\Fortran-Project\Visualization\output-" // trim(adjustl(interval_str)) // "-sliding-lid.txt"
+                    file_name = "./Visualization/output-" // trim(adjustl(interval_str)) // "-sliding-lid.txt"
                     open(1, file=file_name, status="replace", action="write")
                     do j=2, instance_width-1
                         do k=2, instance_height-1
