@@ -3,22 +3,44 @@ program SheBoltOnMyManTilILattice
     implicit none
 
     ! Image data !
-    integer :: img !, img_coords(2)
-
+    integer :: total_images, args_count, io_status
+    character(len=20) :: width_arg, height_arg, coarray_dim_arg
 
     ! Lattice arrays !
     real(8), allocatable :: lattice_initial(:,:,:)[:,:]
-    
-    ! Format for printing the lattice !
-    ! character(len=50) :: format = '(15(f0.2," "),"  ",15(f0.2," "))'
-    ! character(len=50) :: format = '(15(f0.4," "))'
 
-    allocate(lattice_initial(directions, width, height)[coarray_dimensions,*])
+    total_images = num_images()
 
-    ! img = this_image()
-    ! img_coords = this_image(lattice)
-    ! print *, "Image ", img, " coordinates: (", img_coords, ")"
+    args_count = command_argument_count()
 
+    if (args_count < 3) then
+        print *, "Missing arguments"
+        stop
+    end if
+
+    call get_command_argument(1, width_arg)
+    call get_command_argument(2, height_arg)
+    call get_command_argument(3, coarray_dim_arg)
+
+    read(width_arg, *, iostat=io_status) global_width
+    if(io_status /= 0) then
+        print *, "Argument '", trim(width_arg), "' is not a valid integer."
+    end if
+
+    read(height_arg, *, iostat=io_status) global_height
+    if(io_status /= 0) then
+        print *, "Argument '", trim(height_arg), "' is not a valid integer."
+    end if
+
+    read(coarray_dim_arg, *, iostat=io_status) coarray_dimensions
+    if(io_status /= 0) then
+        print *, "Argument '", trim(coarray_dim_arg), "' is not a valid integer."
+    end if
+
+    instance_width = global_width / coarray_dimensions + 2
+    instance_height = global_height / (total_images / coarray_dimensions) + 2
+
+    allocate(lattice_initial(directions, instance_width, instance_height)[coarray_dimensions,*])
 
     ! Intial lattice !
     !call populate_lattice_random(lattice_initial)
@@ -37,12 +59,12 @@ program SheBoltOnMyManTilILattice
 
         subroutine output_results(lattice, interval_length, num_intervals)
 
-            real(8), intent(inout) :: lattice(directions, width, height)[coarray_dimensions,*]
+            real(8), intent(inout) :: lattice(directions, instance_width, instance_height)[coarray_dimensions,*]
             integer, intent(in) :: interval_length, num_intervals
 
             integer :: interval, sub_interval, img, j, k
-            real(8) :: density_arr(width, height)
-            type(velocity) :: velocity_arr(width, height)
+            real(8) :: density_arr(instance_width, instance_height)
+            type(velocity) :: velocity_arr(instance_width, instance_height)
             character(:), allocatable :: file_name
             character(len=20) :: interval_str
 
@@ -59,8 +81,8 @@ program SheBoltOnMyManTilILattice
                 !intial_a = velocity_arr(15,12)%x
 
                 open(1, file="C:\Users\jackg\OneDrive\Desktop\Fortran-Project\Visualization\output-0-sliding-lid.txt", status="replace", action="write")
-                    do j=2, width-1
-                        do k=2, height-1
+                    do j=2, instance_width-1
+                        do k=2, instance_height-1
                             write(1, *) j-1, ", ", k-1, ", ", density_arr(j,k), ", ", velocity_arr(j,k)%x, ", ", velocity_arr(j,k)%y
                         end do
                     end do
@@ -81,8 +103,8 @@ program SheBoltOnMyManTilILattice
                     write(interval_str, '(I0)') interval * interval_length
                     file_name = "C:\Users\jackg\OneDrive\Desktop\Fortran-Project\Visualization\output-" // trim(adjustl(interval_str)) // "-sliding-lid.txt"
                     open(1, file=file_name, status="replace", action="write")
-                    do j=2, width-1
-                        do k=2, height-1
+                    do j=2, instance_width-1
+                        do k=2, instance_height-1
                             write(1, *) j-1, ", ", k-1, ", ", density_arr(j,k), ", ", velocity_arr(j,k)%x, ", ", velocity_arr(j,k)%y
                         end do
                     end do
@@ -94,7 +116,7 @@ program SheBoltOnMyManTilILattice
         end subroutine output_results
 
         subroutine output_results_parallel(lattice)
-            real(8), intent(inout) :: lattice(directions, width, height)[coarray_dimensions,*]
+            real(8), intent(inout) :: lattice(directions, instance_width, instance_height)[coarray_dimensions,*]
 
             integer :: img, j
             character(len=50) :: format = '(15(f0.4," "),"  ",15(f0.4," "))'
@@ -103,12 +125,12 @@ program SheBoltOnMyManTilILattice
 
             if (img .eq. 1) then
                 write(6,*) "Intial Lattice"
-                do j=2,height-1
-                    write(unit=6, fmt=format) lattice(2,2:width-1,j)[1,1], lattice(2,2:width-1,j)[2,1]
+                do j=2,instance_height-1
+                    write(unit=6, fmt=format) lattice(2,2:instance_width-1,j)[1,1], lattice(2,2:instance_width-1,j)[2,1]
                 end do
                 print *, ""
-                do j=2,height-1
-                    write(unit=6, fmt=format) lattice(2,2:width-1,j)[1,2], lattice(2,2:width-1,j)[2,2]
+                do j=2,instance_height-1
+                    write(unit=6, fmt=format) lattice(2,2:instance_width-1,j)[1,2], lattice(2,2:instance_width-1,j)[2,2]
                 end do
                 print *, ""
                 print *, ""
@@ -119,12 +141,12 @@ program SheBoltOnMyManTilILattice
 
             if (img .eq. 1) then
                 write(6,*) "Lattice after 1 stream right"
-                do j=2,height-1
-                    write(unit=6, fmt=format) lattice(2,2:width-1,j)[1,1], lattice(2,2:width-1,j)[2,1]
+                do j=2,instance_height-1
+                    write(unit=6, fmt=format) lattice(2,2:instance_width-1,j)[1,1], lattice(2,2:instance_width-1,j)[2,1]
                 end do
                 print *, ""
-                do j=2,height-1
-                    write(unit=6, fmt=format) lattice(2,2:width-1,j)[1,2], lattice(2,2:width-1,j)[2,2]
+                do j=2,instance_height-1
+                    write(unit=6, fmt=format) lattice(2,2:instance_width-1,j)[1,2], lattice(2,2:instance_width-1,j)[2,2]
                 end do
                 print *, ""
                 print *, ""
@@ -135,12 +157,12 @@ program SheBoltOnMyManTilILattice
 
             if (img .eq. 1) then
                 write(6,*) "Lattice after 2 stream right"
-                do j=2,height-1
-                    write(unit=6, fmt=format) lattice(2,2:width-1,j)[1,1], lattice(2,2:width-1,j)[2,1]
+                do j=2,instance_height-1
+                    write(unit=6, fmt=format) lattice(2,2:instance_width-1,j)[1,1], lattice(2,2:instance_width-1,j)[2,1]
                 end do
                 print *, ""
-                do j=2,height-1
-                    write(unit=6, fmt=format) lattice(2,2:width-1,j)[1,2], lattice(2,2:width-1,j)[2,2]
+                do j=2,instance_height-1
+                    write(unit=6, fmt=format) lattice(2,2:instance_width-1,j)[1,2], lattice(2,2:instance_width-1,j)[2,2]
                 end do
                 print *, ""
                 print *, ""
