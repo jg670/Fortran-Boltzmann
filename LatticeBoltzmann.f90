@@ -8,7 +8,7 @@ module lattice_boltzmann
 
     integer :: global_width = 15, global_height = 15, instance_height = 17, instance_width = 17
     integer, parameter :: directions = 9
-    real(8), parameter :: omega = 1
+    real(8) :: omega = 1
     real(8), parameter :: shift_directions_x(directions) = [0.0,  1.0,  0.0, -1.0,  0.0,  1.0, -1.0, -1.0,  1.0]
     real(8), parameter :: shift_directions_y(directions) = [0.0,  0.0,  1.0,  0.0, -1.0,  1.0,  1.0, -1.0, -1.0]
     real(8), parameter :: weights(directions) = [4.0_8/9.0_8, 1.0_8/9.0_8, 1.0_8/9.0_8, 1.0_8/9.0_8, 1.0_8/9.0_8, 1.0_8/36.0_8, 1.0_8/36.0_8, 1.0_8/36.0_8, 1.0_8/36.0_8]
@@ -456,7 +456,7 @@ module lattice_boltzmann
             density_arr = 1.0_8
             velocity_arr = velocity(0.0_8, 0.0_8)
 
-            call set_lid_velocity_given_reynolds(10.0_8)
+            call set_lid_velocity_given_reynolds(1000.0_8)
 
             lattice = calculate_equilibrium(density_arr, velocity_arr)
 
@@ -482,6 +482,16 @@ module lattice_boltzmann
             calculated_viscosity = log_term * (-1.0_8 / (k**2 * time_step))
 
             analytical_viscosity = calculate_analytical_viscosity()
+
+            ! write(interval_str, '(I0)') step_num
+            ! file_name = "./Visualization/output-" // trim(adjustl(interval_str)) // "-.txt"
+            ! open(1, file=file_name, status="replace", action="write")
+            ! do j = 1, global_width
+            !     do k = 1, global_height
+            !         write(1, *) j, ", ", k, ", ", global_density(j,k), ", ", global_velocity(j,k)%x, ", ", global_velocity(j,k)%y
+            !     end do
+            ! end do
+            ! close(1)
 
             print *, "Calculated viscosity: ", calculated_viscosity
             print *, "Analytical viscosity: ", analytical_viscosity

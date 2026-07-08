@@ -2,10 +2,10 @@ program SheBoltOnMyManTilILattice
     use lattice_boltzmann
     implicit none
 
-    integer :: total_images, args_count, io_status
+    integer :: total_images, args_count, io_status, interval_len, interval_num
     integer :: current_img, current_img_x, current_img_y, img_grid_x, img_grid_y
     integer :: norm_width, norm_height, mod_width, mod_height
-    character(len=20) :: width_arg, height_arg, coarray_dim_arg
+    character(len=20) :: width_arg, height_arg, coarray_dim_arg, interval_length_arg, num_intervals_arg
 
     ! Lattice arrays !
     real(8), allocatable :: lattice_initial(:,:,:)[:,:]
@@ -15,14 +15,16 @@ program SheBoltOnMyManTilILattice
 
     args_count = command_argument_count()
 
-    if (args_count < 3) then
-        print *, "Missing arguments"
+    if (args_count < 5) then
+        print *, "Missing arguments, should be [width height img_dim interval_length num_intervals]"
         stop
     end if
 
     call get_command_argument(1, width_arg)
     call get_command_argument(2, height_arg)
     call get_command_argument(3, coarray_dim_arg)
+    call get_command_argument(4, interval_length_arg)
+    call get_command_argument(5, num_intervals_arg)
 
     read(width_arg, *, iostat=io_status) global_width
     if (io_status /= 0) then
@@ -39,6 +41,18 @@ program SheBoltOnMyManTilILattice
     read(coarray_dim_arg, *, iostat=io_status) coarray_dimensions
     if (io_status /= 0) then
         print *, "Argument '", trim(coarray_dim_arg), "' is not a valid integer."
+        stop
+    end if
+
+    read(interval_length_arg, *, iostat=io_status) interval_len
+    if (io_status /= 0) then
+        print *, "Argument '", trim(interval_length_arg), "' is not a valid integer."
+        stop
+    end if
+
+    read(num_intervals_arg, *, iostat=io_status) interval_num
+    if (io_status /= 0) then
+        print *, "Argument '", trim(num_intervals_arg), "' is not a valid integer."
         stop
     end if
 
@@ -75,126 +89,171 @@ program SheBoltOnMyManTilILattice
     !call populate_lattice_couette(lattice_initial)
     !call populate_lattice_poiseuille(lattice_initial)
     !call populate_lattice_sliding_lid(lattice_initial)
-    call populate_lattice_sliding_lid_parallel(lattice_initial)
+    !call populate_lattice_sliding_lid_parallel(lattice_initial)
     
     sync all
 
-    call output_results_parallel(lattice_initial)
+    call do_shear_wave_decay_test( lattice_initial)
+
+    !call output_results(lattice_initial, interval_len, interval_num)
 
     contains
 
         subroutine output_results(lattice, interval_length, num_intervals)
-
             real(8), intent(inout) :: lattice(directions, instance_width, instance_height)[coarray_dimensions,*]
             integer, intent(in) :: interval_length, num_intervals
+            integer :: interval, sub_interval
 
-            integer :: interval, sub_interval, img, j, k
-            real(8) :: density_arr(instance_width, instance_height)
-            type(velocity) :: velocity_arr(instance_width, instance_height)
-            character(:), allocatable :: file_name
-            character(len=20) :: interval_str
+            ! Initial lattice output (step 0)
+            call gather_and_write(lattice, 0)
 
-            !real(8) :: intial_a
-
-            img = this_image()
-
-            if (img .eq. 1) then
-
-                ! Intial lattice !
-                density_arr = calculate_density_array(lattice)
-                velocity_arr = calculate_average_velocity_array(lattice, density_arr)
-
-                !intial_a = velocity_arr(15,12)%x
-
-                open(1, file="./Visualization/output-0-sliding-lid.txt", status="replace", action="write")
-                    do j=2, instance_width-1
-                        do k=2, instance_height-1
-                            write(1, *) j-1, ", ", k-1, ", ", density_arr(j,k), ", ", velocity_arr(j,k)%x, ", ", velocity_arr(j,k)%y
-                        end do
-                    end do
-                close(1)
-
-                do interval=1, num_intervals
-                    do sub_interval=1, interval_length
-                        call perform_one_time_step(lattice)
-                    end do
-
-                    density_arr = calculate_density_array(lattice)
-                    velocity_arr = calculate_average_velocity_array(lattice, density_arr)
-
-                    !call check_viscosity(intial_a, velocity_arr(15,12)%x, interval * interval_length)
-                    !call check_poiseuille_velocity(density_arr(15,12), velocity_arr(15,12)%x, 12)
-
-                    ! Output file !
-                    write(interval_str, '(I0)') interval * interval_length
-                    file_name = "./Visualization/output-" // trim(adjustl(interval_str)) // "-sliding-lid.txt"
-                    open(1, file=file_name, status="replace", action="write")
-                    do j=2, instance_width-1
-                        do k=2, instance_height-1
-                            write(1, *) j-1, ", ", k-1, ", ", density_arr(j,k), ", ", velocity_arr(j,k)%x, ", ", velocity_arr(j,k)%y
-                        end do
-                    end do
-                    close(1)            
+            do interval=1, num_intervals
+                do sub_interval=1, interval_length
+                    call perform_one_time_step(lattice)
                 end do
-            end if
-            sync all
 
+                ! CRITICAL: Ensure all images finish calculating before image 1 starts reading
+                sync all
+
+                call gather_and_write(lattice, interval * interval_length)
+            end do
         end subroutine output_results
 
-        subroutine output_results_parallel(lattice)
-            real(8), intent(inout) :: lattice(directions, instance_width, instance_height)[coarray_dimensions,*]
-
-            integer :: img, j
-            character(len=50) :: format = '(15(f0.4," "),"  ",15(f0.4," "))'
-
+        ! Sibling subroutine to handle the pulling and writing
+        subroutine gather_and_write(lattice, step_num)
+            real(8), intent(in) :: lattice(directions, instance_width, instance_height)[coarray_dimensions,*]
+            integer, intent(in) :: step_num
+            
+            ! Global arrays that only image 1 needs to construct the full field
+            real(8), allocatable :: global_density(:,:)
+            type(velocity), allocatable :: global_velocity(:,:)
+            
+            integer :: img, remote_img, rx, ry, rx_start, ry_start, rw, rh, j, k
+            character(:), allocatable :: file_name
+            character(len=20) :: interval_str
+            
+            ! Buffers scaled to your instance bounds to match your module functions
+            real(8) :: remote_lattice(directions, instance_width, instance_height)
+            real(8) :: local_density(instance_width, instance_height)
+            type(velocity) :: local_velocity(instance_width, instance_height)
+            
             img = this_image()
+            
+            if (img == 1) then
+                allocate(global_density(global_width, global_height))
+                allocate(global_velocity(global_width, global_height))
 
-            if (img .eq. 1) then
-                write(6,*) "Intial Lattice"
-                do j=2,instance_height-1
-                    write(unit=6, fmt=format) lattice(2,2:instance_width-1,j)[1,1], lattice(2,2:instance_width-1,j)[2,1]
+                ! Assemble the decomposed domain by looping over all images
+                do remote_img = 1, total_images
+                    ! Determine the remote image's location in the coarray grid
+                    rx = mod(remote_img - 1, img_grid_x) + 1
+                    ry = (remote_img - 1) / img_grid_x + 1
+                    
+                    ! Calculate local bounds for this specific chunk (ignoring ghost nodes)
+                    if (rx == img_grid_x) then
+                        rw = norm_width + mod_width
+                    else
+                        rw = norm_width
+                    end if
+                    
+                    if (ry == img_grid_y) then
+                        rh = norm_height + mod_height
+                    else
+                        rh = norm_height
+                    end if
+                    
+                    ! Map local chunk to global starting coordinates
+                    rx_start = (rx - 1) * norm_width + 1
+                    ry_start = (ry - 1) * norm_height + 1
+                    
+                    ! Pull the lattice data from the remote image
+                    remote_lattice = lattice(:,:,:)[rx, ry]
+                    
+                    ! Calculate macroscopic variables using module functions
+                    local_density = calculate_density_array(remote_lattice)
+                    local_velocity = calculate_average_velocity_array(remote_lattice, local_density)
+                    
+                    ! Stitch the valid data (ignoring ghost boundaries 1 and N) into the global field
+                    do j = 1, rw
+                        do k = 1, rh
+                            global_density(rx_start + j - 1, ry_start + k - 1) = local_density(j + 1, k + 1)
+                            global_velocity(rx_start + j - 1, ry_start + k - 1) = local_velocity(j + 1, k + 1)
+                        end do
+                    end do
                 end do
-                print *, ""
-                do j=2,instance_height-1
-                    write(unit=6, fmt=format) lattice(2,2:instance_width-1,j)[1,2], lattice(2,2:instance_width-1,j)[2,2]
+                
+                ! Write the fully assembled domain to file
+                write(interval_str, '(I0)') step_num
+                file_name = "./Visualization/output-" // trim(adjustl(interval_str)) // "-sliding-lid.txt"
+                open(1, file=file_name, status="replace", action="write")
+                do j = 1, global_width
+                    do k = 1, global_height
+                        write(1, *) j, ", ", k, ", ", global_density(j,k), ", ", global_velocity(j,k)%x, ", ", global_velocity(j,k)%y
+                    end do
                 end do
-                print *, ""
-                print *, ""
+                close(1)
+                
+                deallocate(global_density, global_velocity)
             end if
-            sync all
+        end subroutine gather_and_write
 
-            call perform_one_time_step(lattice)
+        subroutine do_shear_wave_decay_test(lattice)
+            real(8), intent(inout) :: lattice(directions, instance_width, instance_height)[*]
+            
+            real(8), dimension(9) :: omega_vals = [0.2_8, 0.4_8, 0.6_8, 0.8_8, 1.0_8, 1.2_8, 1.4_8, 1.6_8, 1.8_8]
+            integer :: o_idx, i, d
+            real(8) :: point_density, point_momentum_x
+            real(8) :: target_u
+            
+            integer :: decay_unit = 25
+            character(len=50) :: filename
+            integer(8) :: total_steps = 1000
+            
+            ! Target analytical global coordinate
+            integer :: target_global_y = 8 
+            
+            ! Array indices accounting for a 1-cell thick ghost boundary
+            integer :: target_array_y, target_array_x
+            
+            target_array_y = target_global_y + 1
+            target_array_x = 2 ! Global x = 1
 
-            if (img .eq. 1) then
-                write(6,*) "Lattice after 1 stream right"
-                do j=2,instance_height-1
-                    write(unit=6, fmt=format) lattice(2,2:instance_width-1,j)[1,1], lattice(2,2:instance_width-1,j)[2,1]
+            do o_idx = 1, size(omega_vals)
+                omega = omega_vals(o_idx)
+                call populate_lattice_shear_wave(lattice)
+
+                ! No need to check for current_img == 1
+                write(filename, '("./visualization/shear_decay_omega_", F3.1, ".txt")') omega
+                open(unit=decay_unit, file=trim(filename), status="replace")
+                write(decay_unit, *) "TimeStep Velocity_X"
+
+                do i = 1, total_steps
+                    call perform_one_time_step(lattice)
+                    
+                    target_u = 0.0_8
+                    point_density = 0.0_8
+                    point_momentum_x = 0.0_8
+                    
+                    ! Calculate moments directly at the specific node
+                    do d = 1, directions
+                        point_density = point_density + lattice(d, target_array_x, target_array_y)
+                        point_momentum_x = point_momentum_x + lattice(d, target_array_x, target_array_y) * shift_directions_x(d)
+                    end do
+                    
+                    if (point_density > 0.0_8) then
+                        target_u = abs(point_momentum_x / point_density)
+                    end if
+
+                    ! No reduction (co_max) needed, just directly write the output
+                    if (mod(i, 10) == 0) then 
+                        write(decay_unit, *) i, target_u
+                    end if
                 end do
-                print *, ""
-                do j=2,instance_height-1
-                    write(unit=6, fmt=format) lattice(2,2:instance_width-1,j)[1,2], lattice(2,2:instance_width-1,j)[2,2]
-                end do
-                print *, ""
-                print *, ""
-            end if
-            sync all
 
-            call perform_one_time_step(lattice)
-
-            if (img .eq. 1) then
-                write(6,*) "Lattice after 2 stream right"
-                do j=2,instance_height-1
-                    write(unit=6, fmt=format) lattice(2,2:instance_width-1,j)[1,1], lattice(2,2:instance_width-1,j)[2,1]
-                end do
-                print *, ""
-                do j=2,instance_height-1
-                    write(unit=6, fmt=format) lattice(2,2:instance_width-1,j)[1,2], lattice(2,2:instance_width-1,j)[2,2]
-                end do
-                print *, ""
-                print *, ""
-            end if
-            sync all
-
-        end subroutine output_results_parallel
-
+                close(decay_unit)
+                print *, "Completed analytical decay test for omega = ", omega
+            end do
+            
+        end subroutine do_shear_wave_decay_test
+        
 end program SheBoltOnMyManTilILattice
