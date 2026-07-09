@@ -1,4 +1,4 @@
-program SheBoltOnMyManTilILattice
+program LatticeBoltzmannMain
     use lattice_boltzmann
     implicit none
 
@@ -296,4 +296,4 @@ program SheBoltOnMyManTilILattice
 
         end subroutine do_parallel_performance_test
         
-end program SheBoltOnMyManTilILattice
+end program LatticeBoltzmannMain
