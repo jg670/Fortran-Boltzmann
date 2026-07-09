@@ -89,12 +89,12 @@ program SheBoltOnMyManTilILattice
     !call populate_lattice_couette(lattice_initial)
     !call populate_lattice_poiseuille(lattice_initial)
     !call populate_lattice_sliding_lid(lattice_initial)
-    !call populate_lattice_sliding_lid_parallel(lattice_initial)
+    call populate_lattice_sliding_lid_parallel(lattice_initial)
     
     sync all
 
-    call do_shear_wave_decay_test( lattice_initial)
-
+    !call do_shear_wave_decay_test( lattice_initial)
+    call do_parallel_performance_test(lattice_initial)
     !call output_results(lattice_initial, interval_len, interval_num)
 
     contains
@@ -255,5 +255,45 @@ program SheBoltOnMyManTilILattice
             end do
             
         end subroutine do_shear_wave_decay_test
+
+        subroutine do_parallel_performance_test(lattice)
+            ! Changed to intent(inout) because the simulation modifies it
+            real(8), intent(inout) :: lattice(directions, instance_width, instance_height)[coarray_dimensions,*]
+
+            integer :: start_time, end_time, rate
+            real(8) :: t_elapsed, mlups
+            integer(8) :: total_nodes, total_steps
+            integer :: img, step_idx ! Declared step_idx
+
+            total_steps = 1000
+
+            ! Total fluid nodes is exactly the global physical domain
+            total_nodes = int(global_width, 8) * int(global_height, 8) 
+
+            ! Start timer !
+            call system_clock(count=start_time, count_rate=rate)
+
+            ! Main simulation loop !
+            do step_idx = 1, total_steps
+                ! Pass the dummy argument 'lattice', not 'lattice_initial'
+                call perform_one_time_step(lattice)
+            end do
+
+            ! Stop timer !
+            call system_clock(count=end_time, count_rate=rate)
+
+            ! Calculate elapsed time and MLUPS (only on image 1 to avoid duplicate printing) !
+            img = this_image()
+            if (img == 1) then
+                t_elapsed = real(end_time - start_time, 8) / real(rate, 8)
+                mlups = (real(total_nodes, 8) * real(total_steps, 8)) / (t_elapsed * 1.0e6_8)
+                
+                print *, "Total time (s): ", t_elapsed
+                print *, "MLUPS: ", mlups
+            end if
+
+            sync all
+
+        end subroutine do_parallel_performance_test
         
 end program SheBoltOnMyManTilILattice
