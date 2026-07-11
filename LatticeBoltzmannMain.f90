@@ -8,7 +8,7 @@ program LatticeBoltzmannMain
     character(len=20) :: width_arg, height_arg, coarray_dim_arg, interval_length_arg, num_intervals_arg
 
     ! Lattice arrays !
-    real(8), allocatable :: lattice_initial(:,:,:)[:,:]
+    real(8), allocatable :: lattice_even(:,:,:)[:,:], lattice_odd(:,:,:)[:,:]
 
     total_images = num_images()
     current_img = this_image()
@@ -80,7 +80,8 @@ program LatticeBoltzmannMain
         instance_height = norm_height + 2
     end if
 
-    allocate(lattice_initial(directions, instance_width, instance_height)[coarray_dimensions,*])
+    allocate(lattice_even(directions, instance_width, instance_height)[coarray_dimensions,*])
+    allocate(lattice_odd(directions, instance_width, instance_height)[coarray_dimensions,*])
 
     ! Intial lattice !
     !call populate_lattice_random(lattice_initial)
@@ -89,33 +90,52 @@ program LatticeBoltzmannMain
     !call populate_lattice_couette(lattice_initial)
     !call populate_lattice_poiseuille(lattice_initial)
     !call populate_lattice_sliding_lid(lattice_initial)
-    call populate_lattice_sliding_lid_parallel(lattice_initial)
+    call populate_lattice_sliding_lid_parallel(lattice_even)
+
+    lattice_odd = lattice_even
     
     sync all
 
     !call do_shear_wave_decay_test( lattice_initial)
-    call do_parallel_performance_test(lattice_initial)
-    !call output_results(lattice_initial, interval_len, interval_num)
+    !call do_parallel_performance_test(lattice_even, lattice_odd)
+    call output_results(lattice_even, lattice_odd, interval_len, interval_num)
 
     contains
 
-        subroutine output_results(lattice, interval_length, num_intervals)
-            real(8), intent(inout) :: lattice(directions, instance_width, instance_height)[coarray_dimensions,*]
+        subroutine output_results(lattice_even, lattice_odd, interval_length, num_intervals)
+            real(8), intent(inout) :: lattice_even(directions, instance_width, instance_height)[coarray_dimensions,*]
+            real(8), intent(inout) :: lattice_odd(directions, instance_width, instance_height)[coarray_dimensions,*]
+
+
             integer, intent(in) :: interval_length, num_intervals
             integer :: interval, sub_interval
+            integer(8) :: total_steps
 
             ! Initial lattice output (step 0)
-            call gather_and_write(lattice, 0)
+            call gather_and_write(lattice_even, 0)
+
+            total_steps = 0
 
             do interval=1, num_intervals
                 do sub_interval=1, interval_length
-                    call perform_one_time_step(lattice)
+                    total_steps = total_steps + 1
+                    
+                    if (mod(total_steps, 2) /= 0) then
+                        call perform_one_time_step_fast(lattice_even, lattice_odd)
+                    else 
+                        call perform_one_time_step_fast(lattice_odd, lattice_even)
+                    end if
                 end do
 
                 ! CRITICAL: Ensure all images finish calculating before image 1 starts reading
                 sync all
 
-                call gather_and_write(lattice, interval * interval_length)
+                if (mod(total_steps, 2) /= 0) then
+                    call gather_and_write(lattice_odd, interval * interval_length)
+                else 
+                    call gather_and_write(lattice_even, interval * interval_length)
+                end if
+
             end do
         end subroutine output_results
 
@@ -256,9 +276,11 @@ program LatticeBoltzmannMain
             
         end subroutine do_shear_wave_decay_test
 
-        subroutine do_parallel_performance_test(lattice)
-            ! Changed to intent(inout) because the simulation modifies it
-            real(8), intent(inout) :: lattice(directions, instance_width, instance_height)[coarray_dimensions,*]
+        subroutine do_parallel_performance_test(lattice_even, lattice_odd)
+
+            real(8), intent(inout) :: lattice_even(directions, instance_width, instance_height)[coarray_dimensions,*]
+            real(8), intent(inout) :: lattice_odd(directions, instance_width, instance_height)[coarray_dimensions,*]
+
 
             integer :: start_time, end_time, rate
             real(8) :: t_elapsed, mlups
@@ -276,7 +298,11 @@ program LatticeBoltzmannMain
             ! Main simulation loop !
             do step_idx = 1, total_steps
                 ! Pass the dummy argument 'lattice', not 'lattice_initial'
-                call perform_one_time_step(lattice)
+                if (mod(step_idx, 2) /= 0) then
+                    call perform_one_time_step_fast(lattice_even, lattice_odd)
+                else
+                    call perform_one_time_step_fast(lattice_odd, lattice_even)
+                end if
             end do
 
             ! Stop timer !
