@@ -143,6 +143,8 @@ module lattice_boltzmann_cuda
             real(8), intent(inout) :: lattice(directions, instance_width, instance_height)
             integer, intent(in) :: coords(2), dims(2)
 
+            integer :: j
+
             ! Handle left border (MPI coords are 0-indexed)
             if (coords(1) == 0) then
                 !$acc kernels present(lattice)
@@ -207,9 +209,6 @@ module lattice_boltzmann_cuda
 
             real(8) :: density_arr(instance_width, instance_height)
             type(velocity) :: velocity_arr(instance_width, instance_height)
-            integer :: img
-
-            img = this_image()
 
             density_arr = 1.0_8
             velocity_arr = velocity(0.0_8, 0.0_8)
@@ -266,12 +265,13 @@ program LatticeBoltzmannCudaMain
     implicit none
 
     integer :: ierr, rank, comm_size
-    integer :: dims(2), periods(2), coords(2)
+    integer :: dims(2), coords(2)
     integer :: comm_cart
     integer :: neighbor_n, neighbor_s, neighbor_e, neighbor_w
     integer :: args_count, io_status, interval_len, interval_num
     integer :: norm_width, norm_height, mod_width, mod_height
     character(len=20) :: width_arg, height_arg, coarray_dim_arg, interval_length_arg, num_intervals_arg
+    logical :: periods(2)
 
     ! Lattice arrays
     real(8), allocatable :: lattice_even(:,:,:), lattice_odd(:,:,:)
@@ -298,7 +298,7 @@ program LatticeBoltzmannCudaMain
     ! 2D Cartesian Topology setup
     dims(1) = coarray_dimensions
     dims(2) = comm_size / coarray_dimensions
-    periods = [0, 0] ! Non-periodic globally by default
+    periods = [.false., .false.] ! Non-periodic globally by default
 
     call MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, .false., comm_cart, ierr)
     call MPI_Comm_rank(comm_cart, rank, ierr)
@@ -337,7 +337,7 @@ program LatticeBoltzmannCudaMain
     ! Map arrays to GPU memory
     !$acc enter data copyin(lattice_even, lattice_odd)
 
-    call output_results(lattice_even, lattice_odd, interval_len, interval_num, comm_cart, neighbor_n, neighbor_s, neighbor_e, neighbor_w)
+    call output_results(lattice_even, lattice_odd, interval_len, interval_num, comm_cart, neighbor_n, neighbor_s, neighbor_e, neighbor_w, coords, dims)
 
     ! Clean up GPU memory
     !$acc exit data copyout(lattice_even)
@@ -399,6 +399,7 @@ program LatticeBoltzmannCudaMain
             integer :: stat(MPI_STATUS_SIZE)
             character(len=50) :: file_name
             character(len=20) :: interval_str
+            integer :: d
             
             call MPI_Comm_rank(comm, rank, ierr)
             call MPI_Comm_size(comm, comm_size, ierr)
