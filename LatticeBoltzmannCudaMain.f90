@@ -71,7 +71,10 @@ module lattice_boltzmann_cuda
                 end do
             end do
 
-            !$acc host_data use_device(lattice, send_w, recv_w, send_e, recv_e)
+            ! Uncomment when running on the cluster and comment out flags below !$acc host_data use_device(lattice, send_w, recv_w, send_e, recv_e)
+            !$acc update host(send_w, send_e)
+            !$acc update host(lattice(1:directions, 1:instance_width, 2:2))
+            !$acc update host(lattice(1:directions, 1:instance_width, instance_height-1:instance_height-1))
 
             ! === PHASE 1: X-Direction Sync ===
             if (n_w /= MPI_PROC_NULL) then
@@ -88,12 +91,34 @@ module lattice_boltzmann_cuda
                 call MPI_Irecv(recv_e, directions*instance_height, MPI_DOUBLE_PRECISION, n_e, 0, comm, req(req_count), ierr)
             end if
 
-            if (req_count > 0) call MPI_Waitall(req_count, req(1:req_count), stat, ierr)
+            !if (req_count > 0) call MPI_Waitall(req_count, req(1:req_count), stat, ierr)
 
             ! === PHASE 2: Y-Direction Sync (Contiguous, no buffers needed) ===
-            ! ... (Keep your existing Phase 2 logic exactly as it is) ...
+            !req_count = 0
+
+            ! Send Bottom Inner (2) to North, Receive from North into Bottom Ghost (1)
+            ! (Assuming index 1 is North / Y-axis orientation)
+            if (n_n /= MPI_PROC_NULL) then
+                req_count = req_count + 1
+                call MPI_Isend(lattice(1, 1, 2), directions*instance_width, MPI_DOUBLE_PRECISION, n_n, 2, comm, req(req_count), ierr)
+                req_count = req_count + 1
+                call MPI_Irecv(lattice(1, 1, 1), directions*instance_width, MPI_DOUBLE_PRECISION, n_n, 3, comm, req(req_count), ierr)
+            end if
+
+            ! Send Top Inner (H-1) to South, Receive from South into Top Ghost (H)
+            if (n_s /= MPI_PROC_NULL) then
+                req_count = req_count + 1
+                call MPI_Isend(lattice(1, 1, instance_height - 1), directions*instance_width, MPI_DOUBLE_PRECISION, n_s, 3, comm, req(req_count), ierr)
+                req_count = req_count + 1
+                call MPI_Irecv(lattice(1, 1, instance_height), directions*instance_width, MPI_DOUBLE_PRECISION, n_s, 2, comm, req(req_count), ierr)
+            end if
+
+            if (req_count > 0) call MPI_Waitall(req_count, req(1:req_count), stat, ierr)
             
-            !$acc end host_data
+            !!$acc end host_data
+            !$acc update device(recv_w, recv_e)
+            !$acc update device(lattice(1:directions, 1:instance_width, 1:1))
+            !$acc update device(lattice(1:directions, 1:instance_width, instance_height:instance_height))
 
             ! === UNPACK X-BUFFERS ON GPU ===
             !$acc parallel loop collapse(2) present(lattice, recv_w, recv_e)
