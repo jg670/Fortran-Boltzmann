@@ -148,7 +148,13 @@ module lattice_boltzmann_cuda
                     ! 1. PULL STREAMING
                     f0 = lattice_in(1, j, k)
                     f1 = lattice_in(2, j - 1, k)
-                    ! ... [Keep original f2 through f8 reads] ...
+                    f2 = lattice_in(3, j, k + 1)     ! x: 0, y: 1   -> Pull South
+                    f3 = lattice_in(4, j + 1, k)     ! x:-1, y: 0   -> Pull East
+                    f4 = lattice_in(5, j, k - 1)     ! x: 0, y:-1   -> Pull North
+                    f5 = lattice_in(6, j - 1, k + 1) ! x: 1, y: 1   -> Pull South-West
+                    f6 = lattice_in(7, j + 1, k + 1) ! x:-1, y: 1   -> Pull South-East
+                    f7 = lattice_in(8, j + 1, k - 1) ! x:-1, y:-1   -> Pull North-East
+                    f8 = lattice_in(9, j - 1, k - 1) ! x: 1, y:-1   -> Pull North-West
                     
                     ! 2. MACROSCOPIC VARIABLES
                     density = f0 + f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8
@@ -158,7 +164,30 @@ module lattice_boltzmann_cuda
 
                     ! 3. COLLISION
                     lattice_out(1, j, k) = f0 - omega * (f0 - weights(1) * density * (1.0_8 - 1.5_8 * u_sq))
-                    ! ... [Keep original lattice_out(2) through lattice_out(9) math] ...
+
+                    c_dot_u = vel_x
+                    lattice_out(2, j, k) = f1 - omega * (f1 - weights(2) * density * (1.0_8 + 3.0_8 * c_dot_u + 4.5_8 * c_dot_u**2 - 1.5_8 * u_sq))
+                    
+                    c_dot_u = vel_y
+                    lattice_out(3, j, k) = f2 - omega * (f2 - weights(3) * density * (1.0_8 + 3.0_8 * c_dot_u + 4.5_8 * c_dot_u**2 - 1.5_8 * u_sq))
+                    
+                    c_dot_u = -vel_x
+                    lattice_out(4, j, k) = f3 - omega * (f3 - weights(4) * density * (1.0_8 + 3.0_8 * c_dot_u + 4.5_8 * c_dot_u**2 - 1.5_8 * u_sq))
+                    
+                    c_dot_u = -vel_y
+                    lattice_out(5, j, k) = f4 - omega * (f4 - weights(5) * density * (1.0_8 + 3.0_8 * c_dot_u + 4.5_8 * c_dot_u**2 - 1.5_8 * u_sq))
+                    
+                    c_dot_u = vel_x + vel_y
+                    lattice_out(6, j, k) = f5 - omega * (f5 - weights(6) * density * (1.0_8 + 3.0_8 * c_dot_u + 4.5_8 * c_dot_u**2 - 1.5_8 * u_sq))
+                    
+                    c_dot_u = -vel_x + vel_y
+                    lattice_out(7, j, k) = f6 - omega * (f6 - weights(7) * density * (1.0_8 + 3.0_8 * c_dot_u + 4.5_8 * c_dot_u**2 - 1.5_8 * u_sq))
+                    
+                    c_dot_u = -vel_x - vel_y
+                    lattice_out(8, j, k) = f7 - omega * (f7 - weights(8) * density * (1.0_8 + 3.0_8 * c_dot_u + 4.5_8 * c_dot_u**2 - 1.5_8 * u_sq))
+                    
+                    c_dot_u = vel_x - vel_y
+                    lattice_out(9, j, k) = f8 - omega * (f8 - weights(9) * density * (1.0_8 + 3.0_8 * c_dot_u + 4.5_8 * c_dot_u**2 - 1.5_8 * u_sq))
                     
                 end do
             end do
@@ -436,64 +465,61 @@ program LatticeBoltzmannCudaMain
                 allocate(global_density(global_width, global_height))
                 allocate(global_velocity(global_width, global_height))
                 
-                ! Pre-allocate safe buffers for receiving (sized to the max possible instance size)
-                max_w = (global_width / dims(1)) + mod(global_width, dims(1)) + 2
-                max_h = (global_height / dims(2)) + mod(global_height, dims(2)) + 2
-                
-                block
-                    real(8) :: remote_buffer(directions, max_w, max_h)
-                    real(8) :: local_density(max_w, max_h)
-                    type(velocity) :: local_velocity(max_w, max_h)
-                
-                    ! Assemble the decomposed domain
-                    do remote_rank = 0, comm_size - 1
-                        
-                        ! Get the cartesian coordinates of the remote rank
-                        call MPI_Cart_coords(comm, remote_rank, 2, remote_coords, ierr)
-                        rx = remote_coords(1) ! 0-indexed
-                        ry = remote_coords(2) ! 0-indexed
-                        
-                        ! Calculate local bounds for this specific chunk
-                        if (rx == dims(1) - 1) then
-                            rw = (global_width / dims(1)) + mod(global_width, dims(1))
-                        else
-                            rw = global_width / dims(1)
-                        end if
-                        
-                        if (ry == dims(2) - 1) then
-                            rh = (global_height / dims(2)) + mod(global_height, dims(2))
-                        else
-                            rh = global_height / dims(2)
-                        end if
-                        
-                        ! Map local chunk to global starting coordinates
-                        rx_start = (rx) * (global_width / dims(1)) + 1
-                        ry_start = (ry) * (global_height / dims(2)) + 1
-                        
+                ! Assemble the decomposed domain
+                do remote_rank = 0, comm_size - 1
+                    
+                    ! Get the cartesian coordinates of the remote rank
+                    call MPI_Cart_coords(comm, remote_rank, 2, remote_coords, ierr)
+                    rx = remote_coords(1) ! 0-indexed
+                    ry = remote_coords(2) ! 0-indexed
+                    
+                    ! Calculate exact local bounds for this specific chunk
+                    if (rx == dims(1) - 1) then
+                        rw = (global_width / dims(1)) + mod(global_width, dims(1))
+                    else
+                        rw = global_width / dims(1)
+                    end if
+                    
+                    if (ry == dims(2) - 1) then
+                        rh = (global_height / dims(2)) + mod(global_height, dims(2))
+                    else
+                        rh = global_height / dims(2)
+                    end if
+                    
+                    ! Map local chunk to global starting coordinates
+                    rx_start = (rx) * (global_width / dims(1)) + 1
+                    ry_start = (ry) * (global_height / dims(2)) + 1
+                    
+                    ! CRITICAL FIX: Create a dynamically sized block so the receive buffer 
+                    ! perfectly matches the exact memory stride of the incoming chunk.
+                    block
+                        real(8) :: exact_buffer(directions, rw + 2, rh + 2)
+                        real(8) :: local_density(rw + 2, rh + 2)
+                        type(velocity) :: local_velocity(rw + 2, rh + 2)
+                    
                         ! Pull the lattice data via MPI
                         if (remote_rank == 0) then
-                            remote_buffer(:, 1:instance_width, 1:instance_height) = lattice
+                            exact_buffer = lattice(:, 1:rw+2, 1:rh+2)
                         else
-                            call MPI_Recv(remote_buffer, directions * (rw+2) * (rh+2), MPI_DOUBLE_PRECISION, &
+                            call MPI_Recv(exact_buffer, directions * (rw+2) * (rh+2), MPI_DOUBLE_PRECISION, &
                                           remote_rank, 0, comm, stat, ierr)
                         end if
                         
-                        ! Calculate macroscopic variables using module functions
                         ! Inline Density
                         local_density(1:rw+2, 1:rh+2) = 1.0_8
-                        local_density(2:rw+1, 2:rh+1) = sum(remote_buffer(:, 2:rw+1, 2:rh+1), dim=1)
-
+                        local_density(2:rw+1, 2:rh+1) = sum(exact_buffer(:, 2:rw+1, 2:rh+1), dim=1)
+                        
                         ! Inline Velocity
                         local_velocity(1:rw+2, 1:rh+2)%x = 0.0_8
                         local_velocity(1:rw+2, 1:rh+2)%y = 0.0_8
-
+                        
                         do d = 1, directions
                             local_velocity(2:rw+1, 2:rh+1)%x = local_velocity(2:rw+1, 2:rh+1)%x + &
-                                remote_buffer(d, 2:rw+1, 2:rh+1) * shift_directions_x(d)
+                                exact_buffer(d, 2:rw+1, 2:rh+1) * shift_directions_x(d)
                             local_velocity(2:rw+1, 2:rh+1)%y = local_velocity(2:rw+1, 2:rh+1)%y + &
-                                remote_buffer(d, 2:rw+1, 2:rh+1) * shift_directions_y(d)
+                                exact_buffer(d, 2:rw+1, 2:rh+1) * shift_directions_y(d)
                         end do
-
+                        
                         local_velocity(2:rw+1, 2:rh+1)%x = local_velocity(2:rw+1, 2:rh+1)%x / local_density(2:rw+1, 2:rh+1)
                         local_velocity(2:rw+1, 2:rh+1)%y = local_velocity(2:rw+1, 2:rh+1)%y / local_density(2:rw+1, 2:rh+1)
                         
@@ -504,8 +530,8 @@ program LatticeBoltzmannCudaMain
                                 global_velocity(rx_start + j - 1, ry_start + k - 1) = local_velocity(j + 1, k + 1)
                             end do
                         end do
-                    end do
-                end block
+                    end block
+                end do
                 
                 ! Write the fully assembled domain to file
                 write(interval_str, '(I0)') step_num
@@ -513,7 +539,9 @@ program LatticeBoltzmannCudaMain
                 open(1, file=file_name, status="replace", action="write")
                 do j = 1, global_width
                     do k = 1, global_height
-                        write(1, *) j, ", ", k, ", ", global_density(j,k), ", ", global_velocity(j,k)%x, ", ", global_velocity(j,k)%y
+                        ! CRITICAL FIX: Explicit format string to guarantee clean, identical spacing
+                        write(1, '(I0, A, I0, A, G15.7, A, G15.7, A, G15.7)') &
+                            j, ", ", k, ", ", global_density(j,k), ", ", global_velocity(j,k)%x, ", ", global_velocity(j,k)%y
                     end do
                 end do
                 close(1)
