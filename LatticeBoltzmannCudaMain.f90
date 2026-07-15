@@ -391,7 +391,8 @@ program LatticeBoltzmannCudaMain
     ! Map arrays to GPU memory
     !$acc enter data copyin(lattice_even, lattice_odd)
 
-    call output_results(lattice_even, lattice_odd, interval_len, interval_num, comm_cart, neighbor_n, neighbor_s, neighbor_e, neighbor_w, coords, dims)
+    !call output_results(lattice_even, lattice_odd, interval_len, interval_num, comm_cart, neighbor_n, neighbor_s, neighbor_e, neighbor_w, coords, dims)
+    call do_parallel_performance_test(lattice_even, lattice_odd, comm_cart, neighbor_n, neighbor_s, neighbor_e, neighbor_w, coords, dims)
 
     ! Clean up GPU memory
     !$acc exit data copyout(lattice_even)
