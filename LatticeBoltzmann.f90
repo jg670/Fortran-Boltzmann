@@ -1,25 +1,31 @@
 module lattice_boltzmann
     implicit none
 
+    ! Type used for velocity vectors !
     type :: velocity
         real(8) :: x
         real(8) :: y
     end type velocity
 
+    ! Lattice dimensions, will be overwritten by command line arguments !
     integer :: global_width = 15, global_height = 15, instance_height = 17, instance_width = 17
+
+    ! Simulation parameters !
     integer, parameter :: directions = 9
     real(8) :: omega = 1
     real(8), parameter :: shift_directions_x(directions) = [0.0,  1.0,  0.0, -1.0,  0.0,  1.0, -1.0, -1.0,  1.0]
     real(8), parameter :: shift_directions_y(directions) = [0.0,  0.0,  1.0,  0.0, -1.0,  1.0,  1.0, -1.0, -1.0]
     real(8), parameter :: weights(directions) = [4.0_8/9.0_8, 1.0_8/9.0_8, 1.0_8/9.0_8, 1.0_8/9.0_8, 1.0_8/9.0_8, 1.0_8/36.0_8, 1.0_8/36.0_8, 1.0_8/36.0_8, 1.0_8/36.0_8]
-
     real(8), parameter :: pi = 4.0_8 * atan(1.0_8)
     real(8), parameter :: epsilon = 0.01
     
+    ! Wall velocity, used when simulation has a moving wall !
     type(velocity) :: wall_speed = velocity(0.1_8, 0.0_8)
 
+    ! Input and output pressure used for Poiseuille flow !
     real(8), parameter :: poiseuille_in_pressure = 0.3, poiseuille_out_pressure = 0.29
 
+    ! Width of coarray grid !
     integer :: coarray_dimensions = 1
 
     ! Encoding for boundary configuration. 0 is normal periodic boundaries, 1 is Couette flow, 2 is Poiseuille flow, 3 is sliding lid !
@@ -599,9 +605,6 @@ module lattice_boltzmann
 
             real(8) :: density_arr(instance_width, instance_height)
             type(velocity) :: velocity_arr(instance_width, instance_height)
-            integer :: img
-
-            img = this_image()
 
             density_arr = 1.0_8
             velocity_arr = velocity(0.0_8, 0.0_8)
