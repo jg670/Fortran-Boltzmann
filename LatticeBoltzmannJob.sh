@@ -1,13 +1,13 @@
 #!/bin/bash -x
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=64
-#SBATCH --time=00:40:00
-#SBATCH --job_name=FORTRAN_HELLO
+#SBATCH --time=00:30:00
+#SBATCH --job_name=JG_LATTICE_BOLTZMANN_PERFORMANCE_TEST
 #SBATCH --mem=249gb
 #SBATCH --export=ALL
-#SBATCH --partition=cpu_il
-#SBATCH --output=hello.%j.out
-#SBATCH --error=hello.%j.err
+#SBATCH --partition=dev_cpu_il
+#SBATCH --output=test_results.%j.out
+#SBATCH --error=test_results.%j.err
 module load compiler/intel
 module load mpi/impi
 

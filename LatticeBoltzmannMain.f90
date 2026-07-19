@@ -108,15 +108,12 @@ program LatticeBoltzmannMain
     !!! Uncomment which initial conditions to use for simulation, USE ONLY ONE !!!
 
     ! IMPORTANT NOTE: The following simulations do not support multiple images !
-    !call populate_lattice_random(lattice_initial)
-    !call populate_lattice_dense_center(lattice_initial)
-    !call populate_lattice_shear_wave(lattice_initial)
-    !call populate_lattice_couette(lattice_initial)
-    !call populate_lattice_poiseuille(lattice_initial)
-    !call populate_lattice_sliding_lid(lattice_initial)
-
-    ! This simulation is the only one that supports using multiple images !
-    call populate_lattice_sliding_lid_parallel(lattice_even)
+    !call populate_lattice_random(lattice_even)
+    !call populate_lattice_dense_center(lattice_even)
+    !call populate_lattice_shear_wave(lattice_even)
+    !call populate_lattice_couette(lattice_even)
+    !call populate_lattice_poiseuille(lattice_even)
+    call populate_lattice_sliding_lid(lattice_even)
 
     lattice_odd = lattice_even
     
@@ -124,10 +121,10 @@ program LatticeBoltzmannMain
 
     !!! Uncomment which test to perform (if any) !!!
 
-    ! Runs simulation with different omega values [0.2 -> 1.8] for 100 time steps, outputting the x velocity every 10 time steps along with the step number !
+    ! Runs simulation with different omega values [0.2 -> 1.8] for 1000 time steps, outputting the x velocity every 10 time steps along with the step number !
     ! To be used in tandem with the code in visualization jupyter notebook to compare with the analytical solution !
     ! IMPORTANT NOTE: This test uses hardcoded values and only works with a 30 x 30 grid and one image !
-    !call do_shear_wave_decay_test(lattice_initial)
+    !call do_shear_wave_decay_test(lattice_even, lattice_odd)
 
     ! Runs the simulation for 1000 time steps without any file I/O and calculates the MLUPS, printing the results !
     !call do_parallel_performance_test(lattice_even, lattice_odd)
@@ -161,9 +158,9 @@ program LatticeBoltzmannMain
                     
                     ! If total_steps is odd, use lattice_even as input data and lattice_odd as output lattice, if total_steps is even then vice versa !
                     if (mod(total_steps, 2) /= 0) then
-                        call perform_one_time_step_fast(lattice_even, lattice_odd)
+                        call perform_one_time_step(lattice_even, lattice_odd)
                     else 
-                        call perform_one_time_step_fast(lattice_odd, lattice_even)
+                        call perform_one_time_step(lattice_odd, lattice_even)
                     end if
                 end do
 
@@ -268,106 +265,140 @@ program LatticeBoltzmannMain
             end if
         end subroutine gather_and_write
 
-        ! Runs simulation with different omega values [0.2 -> 1.8] for 100 time steps, outputting the x velocity every 10 time steps along with the step number !
+        ! Runs simulation with different omega values [0.2 -> 1.8] for 1000 time steps, outputting the x velocity every 10 time steps along with the step number !
         ! To be used in tandem with the code in visualization jupyter notebook to compare with the analytical solution !
         ! IMPORTANT NOTE: This test uses hardcoded values and only works with a 30 x 30 grid and one image !
-        subroutine do_shear_wave_decay_test(lattice)
+        subroutine do_shear_wave_decay_test(lattice_even, lattice_odd)
 
             ! Input variable declarations !
-            real(8), intent(inout) :: lattice(directions, instance_width, instance_height)[*]
+            real(8), intent(inout) :: lattice_even(directions, instance_width, instance_height)[coarray_dimensions,*]
+            real(8), intent(inout) :: lattice_odd(directions, instance_width, instance_height)[coarray_dimensions,*]
             
+            ! Omega values to test !
             real(8), dimension(9) :: omega_vals = [0.2_8, 0.4_8, 0.6_8, 0.8_8, 1.0_8, 1.2_8, 1.4_8, 1.6_8, 1.8_8]
+
+            ! Iterators !
             integer :: o_idx, i, d
+
+            ! Point data variables !
             real(8) :: point_density, point_momentum_x
             real(8) :: target_u
             
-            integer :: decay_unit = 25
+            ! File I/O variables !
             character(len=50) :: filename
             integer(8) :: total_steps = 1000
             
-            ! Target analytical global coordinate
-            integer :: target_global_y = 8 
-            
-            ! Array indices accounting for a 1-cell thick ghost boundary
-            integer :: target_array_y, target_array_x
-            
-            target_array_y = target_global_y + 1
-            target_array_x = 2 ! Global x = 1
+            ! Coordinate to measure at (+1 to account for ghost nodes) !
+            integer :: target_array_y = 9, target_array_x = 2 
 
+            ! Loop through the omega values !
             do o_idx = 1, size(omega_vals)
                 omega = omega_vals(o_idx)
-                call populate_lattice_shear_wave(lattice)
 
-                ! No need to check for current_img == 1
+                call populate_lattice_shear_wave(lattice_even)
+
+                lattice_odd = lattice_even
+
+                sync all
+
+                ! Open file for output !
                 write(filename, '("./visualization/shear_decay_omega_", F3.1, ".txt")') omega
-                open(unit=decay_unit, file=trim(filename), status="replace")
-                write(decay_unit, *) "TimeStep Velocity_X"
+                open(2, file=trim(filename), status="replace")
+                write(2, *) "TimeStep Velocity_X"
 
+                ! Loop through 1000 steps !
                 do i = 1, total_steps
-                    call perform_one_time_step(lattice)
-                    
-                    target_u = 0.0_8
-                    point_density = 0.0_8
-                    point_momentum_x = 0.0_8
-                    
-                    ! Calculate moments directly at the specific node
-                    do d = 1, directions
-                        point_density = point_density + lattice(d, target_array_x, target_array_y)
-                        point_momentum_x = point_momentum_x + lattice(d, target_array_x, target_array_y) * shift_directions_x(d)
-                    end do
-                    
-                    if (point_density > 0.0_8) then
-                        target_u = abs(point_momentum_x / point_density)
+                    if (mod(i, 2) /= 0) then
+                        call perform_one_time_step(lattice_even, lattice_odd)
+                    else 
+                        call perform_one_time_step(lattice_odd, lattice_even)
                     end if
 
-                    ! No reduction (co_max) needed, just directly write the output
+                    ! Do the calculations every 10 steps !
                     if (mod(i, 10) == 0) then 
-                        write(decay_unit, *) i, target_u
+                        target_u = 0.0_8
+                        point_density = 0.0_8
+                        point_momentum_x = 0.0_8
+                        
+                        ! Calculate data at the chosen point !
+                        if (mod(i, 2) /= 0) then
+                            do d = 1, directions
+                                point_density = point_density + lattice_odd(d, target_array_x, target_array_y)
+                                point_momentum_x = point_momentum_x + lattice_odd(d, target_array_x, target_array_y) * shift_directions_x(d)
+                            end do
+                        else 
+                            do d = 1, directions
+                                point_density = point_density + lattice_even(d, target_array_x, target_array_y)
+                                point_momentum_x = point_momentum_x + lattice_even(d, target_array_x, target_array_y) * shift_directions_x(d)
+                            end do
+                        end if
+                        
+                        ! Calculate x velocity !
+                        if (point_density > 0.0_8) then
+                            target_u = abs(point_momentum_x / point_density)
+                        end if
+
+                        ! Write x velocity to the output file !
+                        write(2, *) i, target_u
                     end if
                 end do
 
-                close(decay_unit)
-                print *, "Completed analytical decay test for omega = ", omega
+                close(2)
             end do
             
         end subroutine do_shear_wave_decay_test
 
+        ! Runs the simulation for 1000 time steps without any file I/O and calculates the MLUPS, printing the results !
         subroutine do_parallel_performance_test(lattice_even, lattice_odd)
 
+            ! Input variable declarations !
             real(8), intent(inout) :: lattice_even(directions, instance_width, instance_height)[coarray_dimensions,*]
             real(8), intent(inout) :: lattice_odd(directions, instance_width, instance_height)[coarray_dimensions,*]
 
-
+            ! Timer variables !
             integer :: start_time, end_time, rate
+
+            ! MLUPS calculation variables !
             real(8) :: t_elapsed, mlups
             integer(8) :: total_nodes, total_steps
-            integer :: img, step_idx ! Declared step_idx
+
+            ! Iterator !
+            integer :: step_idx
+
+            ! Current image variable !
+            integer :: img 
 
             total_steps = 1000
 
-            ! Total fluid nodes is exactly the global physical domain
+            ! Total fluid nodes !
             total_nodes = int(global_width, 8) * int(global_height, 8) 
 
             ! Start timer !
             call system_clock(count=start_time, count_rate=rate)
 
-            ! Main simulation loop !
+            ! Run for 1000 steps !
             do step_idx = 1, total_steps
-                ! Pass the dummy argument 'lattice', not 'lattice_initial'
+
+                ! If total_steps is odd, use lattice_even as input data and lattice_odd as output lattice, if total_steps is even then vice versa !
                 if (mod(step_idx, 2) /= 0) then
-                    call perform_one_time_step_fast(lattice_even, lattice_odd)
+                    call perform_one_time_step(lattice_even, lattice_odd)
                 else
-                    call perform_one_time_step_fast(lattice_odd, lattice_even)
+                    call perform_one_time_step(lattice_odd, lattice_even)
                 end if
             end do
 
             ! Stop timer !
             call system_clock(count=end_time, count_rate=rate)
 
+            ! Calculate time elapsed on current image !
+            t_elapsed = real(end_time - start_time, 8) / real(rate, 8)
+
+            ! Gets maximum time elapsed on all images !
+            call co_max(t_elapsed)
+
             ! Calculate elapsed time and MLUPS (only on image 1 to avoid duplicate printing) !
             img = this_image()
             if (img == 1) then
-                t_elapsed = real(end_time - start_time, 8) / real(rate, 8)
                 mlups = (real(total_nodes, 8) * real(total_steps, 8)) / (t_elapsed * 1.0e6_8)
                 
                 print *, "Total time (s): ", t_elapsed
