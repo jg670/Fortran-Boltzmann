@@ -561,68 +561,14 @@ module lattice_boltzmann
 
         end subroutine populate_lattice_sliding_lid
 
-        function calculate_analytical_viscosity()
-
-            real(8) :: calculate_analytical_viscosity
-            
-            calculate_analytical_viscosity = (1.0_8 / 3.0_8) * ((1.0_8 / omega) - 0.5_8)
-
-        end function calculate_analytical_viscosity
-
-        subroutine check_viscosity(intial_a, new_a, time_step)
-
-            real(8), intent(in) :: intial_a, new_a
-            integer, intent(in) :: time_step
-
-            real(8) :: log_term, calculated_viscosity, k, analytical_viscosity
-
-            k = (2.0_8 * pi) / instance_height
-            log_term = log(new_a / intial_a)
-            calculated_viscosity = log_term * (-1.0_8 / (k**2 * time_step))
-
-            analytical_viscosity = calculate_analytical_viscosity()
-
-            ! write(interval_str, '(I0)') step_num
-            ! file_name = "./Visualization/output-" // trim(adjustl(interval_str)) // "-.txt"
-            ! open(1, file=file_name, status="replace", action="write")
-            ! do j = 1, global_width
-            !     do k = 1, global_height
-            !         write(1, *) j, ", ", k, ", ", global_density(j,k), ", ", global_velocity(j,k)%x, ", ", global_velocity(j,k)%y
-            !     end do
-            ! end do
-            ! close(1)
-
-            print *, "Calculated viscosity: ", calculated_viscosity
-            print *, "Analytical viscosity: ", analytical_viscosity
-            print *, "Difference: ", calculated_viscosity - analytical_viscosity
-
-
-        end subroutine check_viscosity
-
-        subroutine check_poiseuille_velocity(point_density, point_speed, y_pos)
-
-            real(8), intent(in) :: point_density, point_speed
-            integer :: y_pos
-
-            real(8) :: analytical_viscosity, mu, analytical_speed
-
-            analytical_viscosity = calculate_analytical_viscosity()
-
-            mu = point_density * analytical_viscosity
-
-            analytical_speed = (-1.0_8 / (2.0_8 * mu)) * ((poiseuille_out_pressure - poiseuille_in_pressure) / instance_width) * (y_pos - 1.5_8) * ((instance_height - 0.5_8) - y_pos)
-
-            print *, "Calculated speed: ", point_speed
-            print *, "Analytical: ", analytical_speed
-            print *, "Difference: ", point_speed - analytical_speed
-
-        end subroutine check_poiseuille_velocity
-
         subroutine set_lid_velocity_given_reynolds(reynolds_number)
 
             real(8), intent(in) ::  reynolds_number
+            real(8) :: analytical_viscosity
+
+            analytical_viscosity = (1.0_8 / 3.0_8) * ((1.0_8 / omega) - 0.5_8)
             
-            wall_speed = velocity((reynolds_number * calculate_analytical_viscosity()) / (coarray_dimensions * (instance_width - 2.0_8)), 0.0_8)
+            wall_speed = velocity((reynolds_number * analytical_viscosity) / (coarray_dimensions * (instance_width - 2.0_8)), 0.0_8)
 
         end subroutine set_lid_velocity_given_reynolds
         
